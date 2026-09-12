@@ -16,17 +16,25 @@ export type Principal =
 
 export function trustedAuthHeaders(request: FastifyRequest): Headers {
   const headers = fromNodeHeaders(request.headers);
-  // Always overwrite the internal Better Auth IP header with Fastify's server-derived
-  // address. This prevents clients from spoofing the value that Better Auth uses for
-  // rate limiting/security telemetry while still supporting trusted proxy resolution
-  // through Fastify's `trustProxy` setting.
-  headers.set('x-onbae-client-ip', request.ip);
+  // Always overwrite the internal auth IP header with Fastify's server-derived
+  // address. This prevents spoofing while still supporting explicit trustProxy.
+  headers.set('x-noeone-client-ip', request.ip);
   return headers;
 }
 
+function providedAdminCredential(request: FastifyRequest): string | null {
+  const current = request.headers['x-noeone-admin-key'];
+  if (typeof current === 'string') return current;
+
+  // Compatibility during the public-brand migration. Remove after all private
+  // operators have moved to X-NOEONE-Admin-Key.
+  const legacy = request.headers['x-onbae-admin-key'];
+  return typeof legacy === 'string' ? legacy : null;
+}
+
 export function hasValidAdminCredential(request: FastifyRequest): boolean {
-  const provided = request.headers['x-onbae-admin-key'];
-  if (typeof provided !== 'string') return false;
+  const provided = providedAdminCredential(request);
+  if (!provided) return false;
 
   const expectedBuffer = Buffer.from(env.ADMIN_API_KEY);
   const providedBuffer = Buffer.from(provided);
@@ -40,10 +48,10 @@ export function hasValidAdminCredential(request: FastifyRequest): boolean {
 export function assertAdmin(request: FastifyRequest): void {
   if (hasValidAdminCredential(request)) return;
 
-  const provided = request.headers['x-onbae-admin-key'];
+  const provided = providedAdminCredential(request);
   throw Object.assign(
-    new Error(typeof provided === 'string' ? 'Invalid admin credential.' : 'Missing admin credential.'),
-    { statusCode: typeof provided === 'string' ? 403 : 401 },
+    new Error(provided ? 'Invalid admin credential.' : 'Missing admin credential.'),
+    { statusCode: provided ? 403 : 401 },
   );
 }
 

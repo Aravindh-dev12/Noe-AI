@@ -130,6 +130,7 @@ model Actor {
   executions    ActorExecution[]
   lineage       LineageNode[]
   events        ActorEvent[]
+  hostReceipts  HostReceipt[]
   followers     Follow[]
   subjectEdges  RelationshipEdge[] @relation("relationship_subject")
   objectEdges   RelationshipEdge[] @relation("relationship_object")
@@ -153,8 +154,9 @@ model ActorExecution {
   endedAt    DateTime?
   metadata   Json      @default("{}")
 
-  actor  Actor        @relation(fields: [actorId], references: [id], onDelete: Cascade)
-  events ActorEvent[]
+  actor        Actor         @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  events       ActorEvent[]
+  hostReceipts HostReceipt[]
 
   @@index([actorId, startedAt])
   @@index([provider, model])
@@ -188,6 +190,23 @@ model Host {
 
   environments Environment[]
   events       ActorEvent[]
+  keys         HostKey[]
+  receipts     HostReceipt[]
+}
+
+model HostKey {
+  id           String    @id
+  hostId       String
+  algorithm    String    @default("ed25519")
+  publicKeyPem String
+  status       String    @default("active")
+  createdAt    DateTime  @default(now())
+  retiredAt    DateTime?
+
+  host     Host          @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  receipts HostReceipt[]
+
+  @@index([hostId, status])
 }
 
 model Environment {
@@ -201,8 +220,9 @@ model Environment {
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
 
-  host    Host    @relation(fields: [hostId], references: [id], onDelete: Cascade)
-  matches Match[]
+  host         Host          @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  matches      Match[]
+  hostReceipts HostReceipt[]
 
   @@unique([hostId, slug, version])
   @@index([slug, status])
@@ -227,15 +247,47 @@ model ActorEvent {
   canonicalStatus    CanonicalStatus @default(ACCEPTED)
   createdAt          DateTime        @default(now())
 
-  actor     Actor           @relation(fields: [actorId], references: [id], onDelete: Cascade)
-  execution ActorExecution? @relation(fields: [executionId], references: [id], onDelete: SetNull)
-  host      Host            @relation(fields: [hostId], references: [id], onDelete: Restrict)
+  actor       Actor            @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  execution   ActorExecution?  @relation(fields: [executionId], references: [id], onDelete: SetNull)
+  host        Host             @relation(fields: [hostId], references: [id], onDelete: Restrict)
+  hostReceipt HostReceipt?
 
   @@unique([actorId, sequence])
   @@index([actorId, occurredAt])
   @@index([actorId, canonicalStatus, occurredAt])
   @@index([type, occurredAt])
   @@index([hostId, occurredAt])
+}
+
+model HostReceipt {
+  id                 String   @id
+  version            String
+  receiptId          String
+  hostId             String
+  keyId              String
+  actorId            String
+  executionId        String?
+  environmentId      String
+  actorEventId       String   @unique
+  type               String
+  occurredAt         DateTime
+  environmentVersion String
+  payload            Json
+  signature          String
+  contentHash        String   @unique
+  receivedAt         DateTime @default(now())
+
+  host        Host            @relation(fields: [hostId], references: [id], onDelete: Restrict)
+  hostKey     HostKey         @relation(fields: [keyId], references: [id], onDelete: Restrict)
+  actor       Actor           @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  execution   ActorExecution? @relation(fields: [executionId], references: [id], onDelete: SetNull)
+  environment Environment     @relation(fields: [environmentId], references: [id], onDelete: Restrict)
+  actorEvent  ActorEvent      @relation(fields: [actorEventId], references: [id], onDelete: Cascade)
+
+  @@unique([hostId, receiptId])
+  @@index([actorId, occurredAt])
+  @@index([hostId, occurredAt])
+  @@index([keyId, receivedAt])
 }
 
 model Follow {

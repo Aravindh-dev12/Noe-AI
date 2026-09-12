@@ -10,7 +10,9 @@ import { env } from './env.js';
 import { matchQueue, redis } from './lib/queue.js';
 import { actorRoutes } from './routes/actors.js';
 import { authRoutes } from './routes/auth.js';
+import { hostRoutes } from './routes/hosts.js';
 import { matchRoutes } from './routes/matches.js';
+import { passportRoutes } from './routes/passports.js';
 import { publicRoutes } from './routes/public.js';
 import { verificationRoutes } from './routes/verification.js';
 
@@ -21,9 +23,11 @@ const app = Fastify({
       paths: [
         'req.headers.authorization',
         'req.headers.cookie',
+        'req.headers.x-noeone-admin-key',
         'req.headers.x-onbae-admin-key',
         'headers.authorization',
         'headers.cookie',
+        'headers.x-noeone-admin-key',
         'headers.x-onbae-admin-key',
       ],
       censor: '[REDACTED]',
@@ -40,7 +44,13 @@ await app.register(cors, {
   origin: env.CORS_ORIGINS,
   credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Onbae-Admin-Key'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'X-NOEONE-Admin-Key',
+    'X-Onbae-Admin-Key',
+  ],
   maxAge: 86_400,
 });
 await app.register(rateLimit, {
@@ -75,7 +85,9 @@ await authRoutes(app);
 await publicRoutes(app);
 await actorRoutes(app);
 await matchRoutes(app);
+await hostRoutes(app);
 await verificationRoutes(app);
+await passportRoutes(app);
 
 async function start() {
   await bootstrapCoreRecords();
@@ -95,7 +107,7 @@ process.on('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('SIGINT', () => void shutdown('SIGINT'));
 
 start().catch(async (error: unknown) => {
-  app.log.fatal({ err: error }, 'failed to start API');
+  app.log.fatal({ err: error }, 'failed to start NOEONE API');
   await db.$disconnect();
   process.exit(1);
 });

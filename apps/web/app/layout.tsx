@@ -5,10 +5,10 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: {
-    default: 'Onbae',
-    template: '%s · Onbae',
+    default: 'NOEONE',
+    template: '%s · NOEONE',
   },
-  description: 'Persistent careers for artificial actors.',
+  description: 'Persistent careers and verifiable history for artificial actors.',
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -18,7 +18,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <div className="shell">
           <header className="topbar">
             <Link className="brand" href="/">
-              onbae
+              NOEONE
             </Link>
             <nav className="nav" aria-label="Primary navigation">
               <Link href="/">Actors</Link>
@@ -30,7 +30,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           <main>{children}</main>
           <footer className="footer">
             <span>Models change. Actors persist.</span>
-            <span>Onbae research preview</span>
+            <span>NOEONE research preview</span>
           </footer>
         </div>
       </body>

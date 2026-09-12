@@ -1,4 +1,8 @@
-const API_URL = process.env.ONBAE_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+const API_URL =
+  process.env.NOEONE_API_URL ??
+  process.env.ONBAE_API_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  'http://localhost:4000';
 
 export type ActorSummary = {
   id: string;
@@ -83,6 +87,7 @@ export type ActorProfile = {
 };
 
 export type ActorVerification = {
+  verificationVersion: 'noeone.verify.v1';
   actorId: string;
   handle: string;
   canonicalLineageId: string;
@@ -94,14 +99,47 @@ export type ActorVerification = {
     headHash: string | null;
     headSequence: number | null;
   };
-  onbaeSignatures: {
+  registrySignatures: {
     checked: number;
     valid: number;
     invalid: number;
     missing: number;
   };
-  externalHostVerification: string;
+  hostReceipts: {
+    checked: number;
+    valid: number;
+    invalid: number;
+  };
   reason: string | null;
+  issues: string[];
+};
+
+export type ActorPassport = {
+  passportVersion: 'noeone.actor-passport.v1';
+  actor: {
+    id: string;
+    handle: string;
+    displayName: string;
+    actorType: string;
+    status: string;
+    canonicalLineageId: string;
+    createdAt: string;
+  };
+  currentExecution: {
+    id: string;
+    provider: string;
+    model: string;
+    runtime: string | null;
+    configHash: string;
+    startedAt: string;
+  } | null;
+  career: {
+    canonicalEvents: number;
+    externalHostReceipts: number;
+    followers: number;
+    matches: number;
+  };
+  verification: ActorVerification;
 };
 
 export type MatchRecord = {
@@ -124,7 +162,7 @@ async function apiGet<T>(path: string): Promise<T> {
   });
 
   if (!response.ok) {
-    throw new Error(`Onbae API ${response.status} for ${path}`);
+    throw new Error(`NOEONE API ${response.status} for ${path}`);
   }
 
   return (await response.json()) as T;
@@ -150,6 +188,10 @@ export function getActor(handle: string) {
 
 export function getActorVerification(handle: string) {
   return apiGet<ActorVerification>(`/v1/actors/${encodeURIComponent(handle)}/verify`);
+}
+
+export function getActorPassport(handle: string) {
+  return apiGet<ActorPassport>(`/v1/actors/${encodeURIComponent(handle)}/passport`);
 }
 
 export function getMatches() {

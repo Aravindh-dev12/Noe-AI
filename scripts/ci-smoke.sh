@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Internal filenames keep the historical prefix so older CI diagnostics remain easy
+# to compare across the NOEONE brand migration.
 api_log=/tmp/onbae-api.log
 worker_log=/tmp/onbae-worker.log
 web_log=/tmp/onbae-web.log
@@ -72,9 +74,7 @@ poll_match() {
   for _ in $(seq 1 60); do
     match_json=$(curl --fail --silent --show-error --max-time 5 "$api/v1/matches/${match_id}")
     match_status=$(json_field status <<<"$match_json")
-    if [ "$match_status" = "COMPLETED" ]; then
-      return 0
-    fi
+    if [ "$match_status" = "COMPLETED" ]; then return 0; fi
     if [ "$match_status" = "FAILED" ] || [ "$match_status" = "CANCELLED" ]; then
       echo "Match ${match_id} ended with status ${match_status}" >&2
       echo "$match_json" >&2
@@ -109,21 +109,19 @@ wait_for_url "$api/health/ready" "$api_pid"
 curl --fail --silent --show-error --max-time 5 "$api/health/live" >/dev/null
 kill -0 "$worker_pid"
 
-# Privileged system path remains healthy.
 admin_match=$(curl --fail-with-body --silent --show-error --max-time 10 \
   -X POST "$api/v1/matches" \
   -H 'content-type: application/json' \
-  -H "x-onbae-admin-key: ${ADMIN_API_KEY}" \
+  -H "x-noeone-admin-key: ${ADMIN_API_KEY}" \
   --data '{"actorAId":"act_nova","actorBId":"act_echo","environmentId":"env_triad_v1"}')
 admin_match_id=$(json_field id <<<"$admin_match")
 poll_match "$admin_match_id"
 
-# Create and authenticate the owning human principal.
 curl --fail-with-body --silent --show-error --max-time 10 \
   -X POST "$api/api/auth/sign-up/email" \
   -H "origin: ${origin}" \
   -H 'content-type: application/json' \
-  --data '{"name":"Smoke Owner","email":"smoke-owner@onbae.test","password":"SmokeOwner-2026-Strong"}' >/tmp/signup-owner.json
+  --data '{"name":"Smoke Owner","email":"smoke-owner@noeone.test","password":"SmokeOwner-2026-Strong"}' >/tmp/signup-owner.json
 
 curl --fail-with-body --silent --show-error --max-time 10 \
   -c "$owner_cookies" \
@@ -131,18 +129,17 @@ curl --fail-with-body --silent --show-error --max-time 10 \
   -X POST "$api/api/auth/sign-in/email" \
   -H "origin: ${origin}" \
   -H 'content-type: application/json' \
-  --data '{"email":"smoke-owner@onbae.test","password":"SmokeOwner-2026-Strong","rememberMe":true}' >/tmp/signin-owner.json
+  --data '{"email":"smoke-owner@noeone.test","password":"SmokeOwner-2026-Strong","rememberMe":true}' >/tmp/signin-owner.json
 
 me_json=$(curl --fail --silent --show-error --max-time 5 -b "$owner_cookies" "$api/v1/me")
-python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["authenticated"] is True; assert d["user"]["email"] == "smoke-owner@onbae.test"' <<<"$me_json"
+python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["authenticated"] is True; assert d["user"]["email"] == "smoke-owner@noeone.test"' <<<"$me_json"
 
-# Ownership comes from the authenticated session, never the request body.
 alpha_json=$(curl --fail-with-body --silent --show-error --max-time 10 \
   -b "$owner_cookies" \
   -X POST "$api/v1/actors" \
   -H "origin: ${origin}" \
   -H 'content-type: application/json' \
-  --data '{"handle":"smoke-alpha","displayName":"Smoke Alpha","description":"CI-owned persistent actor","actorType":"user","provider":"mock","model":"nova-seed-v1","runtime":"onbae-worker"}')
+  --data '{"handle":"smoke-alpha","displayName":"Smoke Alpha","description":"CI-owned persistent actor","actorType":"user","provider":"mock","model":"nova-seed-v1","runtime":"noeone-worker"}')
 alpha_id=$(json_field id <<<"$alpha_json")
 
 beta_json=$(curl --fail-with-body --silent --show-error --max-time 10 \
@@ -150,63 +147,52 @@ beta_json=$(curl --fail-with-body --silent --show-error --max-time 10 \
   -X POST "$api/v1/actors" \
   -H "origin: ${origin}" \
   -H 'content-type: application/json' \
-  --data '{"handle":"smoke-beta","displayName":"Smoke Beta","description":"CI-owned persistent actor","actorType":"user","provider":"mock","model":"echo-seed-v1","runtime":"onbae-worker"}')
+  --data '{"handle":"smoke-beta","displayName":"Smoke Beta","description":"CI-owned persistent actor","actorType":"user","provider":"mock","model":"echo-seed-v1","runtime":"noeone-worker"}')
 beta_id=$(json_field id <<<"$beta_json")
 
 owned_json=$(curl --fail --silent --show-error --max-time 5 -b "$owner_cookies" "$api/v1/me/actors")
 python3 -c 'import json,sys; d=json.load(sys.stdin); handles={a["handle"] for a in d}; assert {"smoke-alpha","smoke-beta"}.issubset(handles)' <<<"$owned_json"
 
-# A model/runtime migration must preserve the canonical actor id and append a continuity event.
 migration_json=$(curl --fail-with-body --silent --show-error --max-time 10 \
   -b "$owner_cookies" \
   -X POST "$api/v1/actors/${alpha_id}/migrate" \
   -H "origin: ${origin}" \
   -H 'content-type: application/json' \
-  --data '{"provider":"mock","model":"echo-seed-v1","runtime":"onbae-worker","reason":"ci continuity test"}')
+  --data '{"provider":"mock","model":"echo-seed-v1","runtime":"noeone-worker","reason":"ci continuity test"}')
 ALPHA_ID="$alpha_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["actorId"] == os.environ["ALPHA_ID"]' <<<"$migration_json"
 
 alpha_profile=$(curl --fail --silent --show-error --max-time 5 "$api/v1/actors/smoke-alpha")
 ALPHA_ID="$alpha_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["id"] == os.environ["ALPHA_ID"]; assert d["executions"][0]["model"] == "echo-seed-v1"; assert any(e["type"] == "actor.execution.migrated" for e in d["events"])' <<<"$alpha_profile"
 
-# A second principal cannot mutate the owner's actor.
 curl --fail-with-body --silent --show-error --max-time 10 \
   -X POST "$api/api/auth/sign-up/email" \
   -H "origin: ${origin}" \
   -H 'content-type: application/json' \
-  --data '{"name":"Smoke Stranger","email":"smoke-stranger@onbae.test","password":"SmokeStranger-2026-Strong"}' >/tmp/signup-stranger.json
+  --data '{"name":"Smoke Stranger","email":"smoke-stranger@noeone.test","password":"SmokeStranger-2026-Strong"}' >/tmp/signup-stranger.json
 curl --fail-with-body --silent --show-error --max-time 10 \
   -c "$stranger_cookies" \
   -b "$stranger_cookies" \
   -X POST "$api/api/auth/sign-in/email" \
   -H "origin: ${origin}" \
   -H 'content-type: application/json' \
-  --data '{"email":"smoke-stranger@onbae.test","password":"SmokeStranger-2026-Strong","rememberMe":true}' >/tmp/signin-stranger.json
+  --data '{"email":"smoke-stranger@noeone.test","password":"SmokeStranger-2026-Strong","rememberMe":true}' >/tmp/signin-stranger.json
 
 forbidden_status=$(curl --silent --show-error --max-time 10 \
-  -o /tmp/forbidden.json \
-  -w '%{http_code}' \
-  -b "$stranger_cookies" \
-  -X POST "$api/v1/actors/${alpha_id}/migrate" \
-  -H "origin: ${origin}" \
+  -o /tmp/forbidden.json -w '%{http_code}' -b "$stranger_cookies" \
+  -X POST "$api/v1/actors/${alpha_id}/migrate" -H "origin: ${origin}" \
   -H 'content-type: application/json' \
-  --data '{"provider":"mock","model":"nova-seed-v1","runtime":"onbae-worker"}')
+  --data '{"provider":"mock","model":"nova-seed-v1","runtime":"noeone-worker"}')
 assert_status "403" "$forbidden_status" "cross-owner migration"
 
-# Unauthenticated mutations must also stay closed.
 unauthenticated_status=$(curl --silent --show-error --max-time 10 \
-  -o /tmp/unauthenticated.json \
-  -w '%{http_code}' \
-  -X POST "$api/v1/actors/${alpha_id}/migrate" \
-  -H "origin: ${origin}" \
+  -o /tmp/unauthenticated.json -w '%{http_code}' \
+  -X POST "$api/v1/actors/${alpha_id}/migrate" -H "origin: ${origin}" \
   -H 'content-type: application/json' \
-  --data '{"provider":"mock","model":"nova-seed-v1","runtime":"onbae-worker"}')
+  --data '{"provider":"mock","model":"nova-seed-v1","runtime":"noeone-worker"}')
 assert_status "401" "$unauthenticated_status" "unauthenticated migration"
 
-# Owner schedules a worker-backed match. Its result becomes part of the same actor's canonical history.
 match_json=$(curl --fail-with-body --silent --show-error --max-time 10 \
-  -b "$owner_cookies" \
-  -X POST "$api/v1/matches" \
-  -H "origin: ${origin}" \
+  -b "$owner_cookies" -X POST "$api/v1/matches" -H "origin: ${origin}" \
   -H 'content-type: application/json' \
   --data "{\"actorAId\":\"${alpha_id}\",\"actorBId\":\"${beta_id}\",\"environmentId\":\"env_triad_v1\"}")
 match_id=$(json_field id <<<"$match_json")
@@ -215,22 +201,21 @@ poll_match "$match_id"
 alpha_after_match=$(curl --fail --silent --show-error --max-time 5 "$api/v1/actors/smoke-alpha")
 python3 -c 'import json,sys; d=json.load(sys.stdin); assert any(e["type"] == "competition.result" for e in d["events"])' <<<"$alpha_after_match"
 
-# Onbae must be able to independently verify the stored career chain and every
-# first-party signature after creation, migration, and competition events.
 verification_json=$(curl --fail --silent --show-error --max-time 10 "$api/v1/actors/smoke-alpha/verify")
-ALPHA_ID="$alpha_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["actorId"] == os.environ["ALPHA_ID"]; assert d["valid"] is True; assert d["chain"]["valid"] is True; assert d["eventCount"] >= 3; assert d["onbaeSignatures"]["checked"] == d["onbaeSignatures"]["valid"]; assert d["onbaeSignatures"]["invalid"] == 0; assert d["onbaeSignatures"]["missing"] == 0' <<<"$verification_json"
+ALPHA_ID="$alpha_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["verificationVersion"] == "noeone.verify.v1"; assert d["actorId"] == os.environ["ALPHA_ID"]; assert d["valid"] is True; assert d["chain"]["valid"] is True; assert d["eventCount"] >= 3; assert d["registrySignatures"]["checked"] == d["registrySignatures"]["valid"]; assert d["registrySignatures"]["invalid"] == 0; assert d["registrySignatures"]["missing"] == 0; assert d["hostReceipts"]["invalid"] == 0' <<<"$verification_json"
 
-# Production web server must boot and serve the main product surfaces.
+passport_json=$(curl --fail --silent --show-error --max-time 10 "$api/v1/actors/smoke-alpha/passport")
+ALPHA_ID="$alpha_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["passportVersion"] == "noeone.actor-passport.v1"; assert d["actor"]["id"] == os.environ["ALPHA_ID"]; assert d["verification"]["valid"] is True; assert d["career"]["canonicalEvents"] >= 3' <<<"$passport_json"
+
 NODE_ENV=production pnpm --filter @onbae/web start >"$web_log" 2>&1 &
 web_pid=$!
 wait_for_url "$web/" "$web_pid"
 curl --fail --silent --show-error --max-time 5 "$web/matches" >/dev/null
 curl --fail --silent --show-error --max-time 5 "$web/account" >/dev/null
 
-# The auth layer should receive a server-derived IP; regressions emit a Better Auth warning.
 if grep -q "Rate limiting could not determine a client IP" "$api_log"; then
   echo "Better Auth did not receive a trusted client IP" >&2
   exit 1
 fi
 
-echo "Onbae frozen install, authentication, ownership isolation, model migration, match execution, canonical actor verification, and production web smoke tests passed."
+echo "NOEONE frozen install, authentication, ownership isolation, model migration, match execution, canonical verification, actor passport, and production web smoke tests passed."

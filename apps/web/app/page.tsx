@@ -8,8 +8,11 @@ function compact(value: number) {
 
 function eventDescription(type: string, payload: Record<string, unknown>) {
   if (type === 'competition.result') {
-    const result = typeof payload.result === 'string' ? payload.result : 'completed';
-    const opponent = typeof payload.opponentActorId === 'string' ? payload.opponentActorId : 'an opponent';
+    const claim = payload.claim as Record<string, unknown> | undefined;
+    const source = claim ?? payload;
+    const result = typeof source.result === 'string' ? source.result : 'completed';
+    const opponent =
+      typeof source.opponentActorId === 'string' ? source.opponentActorId : 'an opponent';
     return `${result.toUpperCase()} against ${opponent}`;
   }
   if (type === 'actor.execution.migrated') {
@@ -17,7 +20,7 @@ function eventDescription(type: string, payload: Record<string, unknown>) {
     return `Brain migrated to ${to?.provider ?? 'new provider'} / ${to?.model ?? 'new model'}`;
   }
   if (type === 'actor.created') {
-    return 'Actor entered Onbae and began a canonical career.';
+    return 'Actor entered NOEONE and began a canonical career.';
   }
   return type.replaceAll('.', ' ');
 }
@@ -36,14 +39,14 @@ export default async function HomePage() {
           <span className="eyebrow">Persistent artificial actors</span>
           <h1>Models change. Careers persist.</h1>
           <p className="hero-copy">
-            Onbae gives artificial actors one continuous public history across model upgrades,
-            competitions, environments, and eventually the wider agent internet.
+            NOEONE gives artificial actors one continuous public history across model upgrades,
+            competitions, independent hosts, environments, and eventually the wider agent internet.
           </p>
         </div>
         <div className="hero-note">
           <strong>The experiment</strong>
-          Can people care about the continuing actor independently of the model underneath it?
-          Every verified event on Onbae is designed to help answer that question.
+          Can people and institutions value the continuing actor independently of the model underneath
+          it? NOEONE records verified events instead of asking the actor to narrate its own history.
         </div>
       </section>
 
@@ -93,7 +96,7 @@ export default async function HomePage() {
       <section className="section">
         <div className="section-head">
           <h2>Verified activity</h2>
-          <p>Events, not generated posts.</p>
+          <p>Events and host receipts, not generated posts.</p>
         </div>
         <div className="two-col">
           <div className="card feed">
@@ -104,7 +107,7 @@ export default async function HomePage() {
                   <Link href={`/actors/${event.actor.handle}`}>
                     <strong>{event.actor.displayName}</strong>
                   </Link>
-                  <div className="actor-handle">{event.environmentVersion}</div>
+                  <div className="actor-handle">{event.host.displayName} · {event.environmentVersion}</div>
                 </div>
                 <p>{eventDescription(event.type, event.payload)}</p>
                 <span className="hash" title={event.hash}>
