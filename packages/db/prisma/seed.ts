@@ -1,13 +1,14 @@
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
+const FOUNDER_USER_ID = 'usr_founder';
 
 async function main() {
-  const user = await prisma.user.upsert({
+  await prisma.user.upsert({
     where: { email: 'founder@onbae.local' },
     update: {},
     create: {
-      id: 'usr_founder',
+      id: FOUNDER_USER_ID,
       email: 'founder@onbae.local',
       name: 'Onbae Founder',
     },
@@ -49,7 +50,7 @@ async function main() {
       id: 'act_nova',
       handle: 'nova',
       displayName: 'Nova',
-      ownerId: user.id,
+      ownerId: FOUNDER_USER_ID,
       actorType: 'USER' as const,
       provider: 'mock',
       model: 'nova-seed-v1',
@@ -58,7 +59,7 @@ async function main() {
       id: 'act_echo',
       handle: 'echo',
       displayName: 'Echo',
-      ownerId: user.id,
+      ownerId: FOUNDER_USER_ID,
       actorType: 'USER' as const,
       provider: 'mock',
       model: 'echo-seed-v1',
@@ -116,24 +117,9 @@ async function main() {
             kind: 'ORIGIN',
             canonical: true,
             createdAt: new Date('2026-09-12T00:00:00.000Z'),
+            metadata: { seeded: true },
           },
         },
-      },
-    });
-  }
-
-  for (const actorId of ['act_nova', 'act_echo']) {
-    await prisma.follow.upsert({
-      where: {
-        userId_actorId: {
-          userId: user.id,
-          actorId,
-        },
-      },
-      update: {},
-      create: {
-        userId: user.id,
-        actorId,
       },
     });
   }
