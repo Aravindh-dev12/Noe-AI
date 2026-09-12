@@ -7,7 +7,6 @@ import {
   recordAuthorityAdmissibilityAssessment,
   registerExecutionCapabilityManifest,
   verifyCapabilityContinuity,
-  type Prisma,
 } from '@onbae/db';
 import { z } from 'zod';
 
@@ -74,7 +73,7 @@ export async function capabilityContinuityRoutes(app: FastifyInstance) {
       capabilities: input.capabilities,
       tools: input.tools,
       idempotencyKey: input.idempotencyKey,
-      metadata: input.metadata as Prisma.InputJsonObject,
+      metadata: input.metadata,
       ...(input.frameworkVersion !== undefined ? { frameworkVersion: input.frameworkVersion } : {}),
       ...(input.externalReference !== undefined ? { externalReference: input.externalReference } : {}),
       ...(input.sourceEvidenceArtifactId !== undefined
@@ -100,7 +99,7 @@ export async function capabilityContinuityRoutes(app: FastifyInstance) {
       methodVersion: input.methodVersion,
       reasons: input.reasons,
       idempotencyKey: input.idempotencyKey,
-      metadata: input.metadata as Prisma.InputJsonObject,
+      metadata: input.metadata,
       ...(input.capabilityManifestId !== undefined
         ? { capabilityManifestId: input.capabilityManifestId }
         : {}),
