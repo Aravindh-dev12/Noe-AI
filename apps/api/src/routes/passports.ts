@@ -2,9 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import { normalizeHandle } from '@onbae/actor-core';
 import {
   db,
+  getActorRecognitionSummary,
   verifyAuthorityState,
   verifyConsequenceState,
   verifyInstitutionalState,
+  verifyRecognitionContinuity,
 } from '@onbae/db';
 import { z } from 'zod';
 
@@ -89,6 +91,8 @@ export async function passportRoutes(app: FastifyInstance) {
         institutionalVerification,
         authorityVerification,
         consequenceVerification,
+        recognitionSummary,
+        recognitionVerification,
         commitmentGroups,
         validationGroups,
         authorityGroups,
@@ -101,6 +105,8 @@ export async function passportRoutes(app: FastifyInstance) {
         verifyInstitutionalState(actor.id),
         verifyAuthorityState(actor.id),
         verifyConsequenceState(actor.id),
+        getActorRecognitionSummary(actor.id),
+        verifyRecognitionContinuity(actor.id),
         db.commitment.groupBy({
           by: ['status'],
           where: { debtorActorId: actor.id },
@@ -163,10 +169,7 @@ export async function passportRoutes(app: FastifyInstance) {
       );
 
       return {
-        // Accountability fields are additive in v4; preserve the existing
-        // contract version rather than forcing clients to treat an extension
-        // as a breaking schema change.
-        passportVersion: 'noeone.actor-passport.v4',
+        passportVersion: 'noeone.actor-passport.v5',
         actor: {
           id: actor.id,
           handle: actor.handle,
@@ -182,6 +185,12 @@ export async function passportRoutes(app: FastifyInstance) {
           lastAcceptedTransition: actor.continuityTransitions[0] ?? null,
           ancestry: actor.childAncestry,
           descendantCount: actor._count.parentAncestries,
+        },
+        recognition: {
+          assessmentCount: recognitionSummary.assessmentCount,
+          asOf: recognitionSummary.asOf,
+          contexts: recognitionSummary.contexts,
+          verification: recognitionVerification,
         },
         institutional: {
           evidenceBindingCount: actor._count.evidenceBindings,
