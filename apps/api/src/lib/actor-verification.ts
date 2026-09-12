@@ -12,6 +12,7 @@ import {
 import { env } from '../env.js';
 
 export const MAX_SYNC_VERIFY_EVENTS = 10_000;
+export const MAX_SYNC_VERIFY_TRANSITIONS = 10_000;
 
 export class ActorVerificationTooLargeError extends Error {
   readonly statusCode = 413;
@@ -63,59 +64,87 @@ function toActorEvent(event: {
   });
 }
 
+function transitionKindToLineageKind(kind: 'MIGRATION' | 'RESTORE' | 'MERGE') {
+  return kind;
+}
+
 export async function verifyActorCareer(actorId: string) {
   const actor = await db.actor.findUnique({
     where: { id: actorId },
-    select: { id: true, handle: true, canonicalLineageId: true },
+    select: { id: true, handle: true, status: true, canonicalLineageId: true },
   });
   if (!actor) return null;
 
-  const eventCount = await db.actorEvent.count({ where: { actorId } });
+  const [eventCount, transitionCount] = await Promise.all([
+    db.actorEvent.count({ where: { actorId } }),
+    db.continuityTransition.count({ where: { actorId } }),
+  ]);
   if (eventCount > MAX_SYNC_VERIFY_EVENTS) {
     throw new ActorVerificationTooLargeError(actorId, eventCount);
   }
+  if (transitionCount > MAX_SYNC_VERIFY_TRANSITIONS) {
+    throw Object.assign(new Error('Actor has too many continuity transitions for synchronous verification.'), {
+      statusCode: 413,
+    });
+  }
 
-  const [storedEvents, storedReceipts] = await Promise.all([
-    db.actorEvent.findMany({
-      where: { actorId },
-      orderBy: { sequence: 'asc' },
-      select: {
-        id: true,
-        actorId: true,
-        sequence: true,
-        executionId: true,
-        hostId: true,
-        type: true,
-        sourceKey: true,
-        occurredAt: true,
-        observedAt: true,
-        environmentVersion: true,
-        payload: true,
-        issuer: true,
-        signature: true,
-        previousEventHash: true,
-        hash: true,
-        canonicalStatus: true,
-      },
-    }),
-    db.hostReceipt.findMany({
-      where: { actorId },
-      orderBy: [{ occurredAt: 'asc' }, { receivedAt: 'asc' }],
-      include: {
-        hostKey: true,
-        actorEvent: {
-          select: {
-            id: true,
-            actorId: true,
-            hostId: true,
-            type: true,
-            sourceKey: true,
-            environmentVersion: true,
+  const [storedEvents, storedReceipts, executions, lineage, transitions, ancestry] =
+    await Promise.all([
+      db.actorEvent.findMany({
+        where: { actorId },
+        orderBy: { sequence: 'asc' },
+        select: {
+          id: true,
+          actorId: true,
+          sequence: true,
+          executionId: true,
+          hostId: true,
+          type: true,
+          sourceKey: true,
+          occurredAt: true,
+          observedAt: true,
+          environmentVersion: true,
+          payload: true,
+          issuer: true,
+          signature: true,
+          previousEventHash: true,
+          hash: true,
+          canonicalStatus: true,
+        },
+      }),
+      db.hostReceipt.findMany({
+        where: { actorId },
+        orderBy: [{ occurredAt: 'asc' }, { receivedAt: 'asc' }],
+        include: {
+          hostKey: true,
+          actorEvent: {
+            select: {
+              id: true,
+              actorId: true,
+              hostId: true,
+              type: true,
+              sourceKey: true,
+              environmentVersion: true,
+            },
           },
         },
-      },
-    }),
-  ]);
+      }),
+      db.actorExecution.findMany({
+        where: { actorId },
+        orderBy: { startedAt: 'asc' },
+      }),
+      db.lineageNode.findMany({
+        where: { actorId },
+        orderBy: { createdAt: 'asc' },
+      }),
+      db.continuityTransition.findMany({
+        where: { actorId },
+        orderBy: [{ proposedAt: 'asc' }, { id: 'asc' }],
+      }),
+      db.actorAncestry.findUnique({
+        where: { childActorId: actorId },
+      }),
+    ]);
 
   const issues: string[] = [];
   const sequenceValid = storedEvents.every((event, index) => event.sequence === index + 1);
@@ -210,12 +239,163 @@ export async function verifyActorCareer(actorId: string) {
 
   if (receiptInvalid > 0) issues.push('host_receipt_invalid');
 
+  // Continuity verification is intentionally independent of event/receipt
+  // cryptography. A perfectly signed event can still be attached to an actor
+  // whose canonical head was advanced inconsistently.
+  const continuityIssues: string[] = [];
+  const activeExecutions = executions.filter((execution) => execution.endedAt === null);
+  const canonicalLineage = lineage.filter((node) => node.canonical);
+
+  if (actor.status === 'ACTIVE' && activeExecutions.length !== 1) {
+    continuityIssues.push('active_actor_must_have_exactly_one_live_execution');
+  }
+  if (canonicalLineage.length !== 1) {
+    continuityIssues.push('actor_must_have_exactly_one_canonical_lineage_head');
+  }
+  if (canonicalLineage[0]?.id !== actor.canonicalLineageId) {
+    continuityIssues.push('actor_canonical_lineage_pointer_mismatch');
+  }
+
+  const executionById = new Map(executions.map((execution) => [execution.id, execution]));
+  const lineageById = new Map(lineage.map((node) => [node.id, node]));
+  const governedLineageIds = new Set<string>();
+  let acceptedTransitions = 0;
+  let supersededTransitions = 0;
+  let rejectedTransitions = 0;
+  let pendingTransitions = 0;
+
+  for (const transition of transitions) {
+    if (transition.status === 'SUPERSEDED') supersededTransitions += 1;
+    else if (transition.status === 'REJECTED') rejectedTransitions += 1;
+    else if (transition.status === 'PROPOSED') pendingTransitions += 1;
+
+    if (transition.status !== 'ACCEPTED') continue;
+    acceptedTransitions += 1;
+
+    if (!transition.resultingExecutionId || !transition.resultingLineageId) {
+      continuityIssues.push(`accepted_transition_missing_result:${transition.id}`);
+      continue;
+    }
+
+    governedLineageIds.add(transition.resultingLineageId);
+    const predecessorExecution = executionById.get(transition.predecessorExecutionId);
+    const resultingExecution = executionById.get(transition.resultingExecutionId);
+    const predecessorLineage = lineageById.get(transition.predecessorLineageId);
+    const resultingLineage = lineageById.get(transition.resultingLineageId);
+
+    if (!predecessorExecution || predecessorExecution.actorId !== actor.id) {
+      continuityIssues.push(`transition_predecessor_execution_invalid:${transition.id}`);
+    }
+    if (!resultingExecution || resultingExecution.actorId !== actor.id) {
+      continuityIssues.push(`transition_resulting_execution_invalid:${transition.id}`);
+    } else if (
+      resultingExecution.provider !== transition.proposedProvider ||
+      resultingExecution.model !== transition.proposedModel ||
+      resultingExecution.runtime !== transition.proposedRuntime ||
+      resultingExecution.configHash !== transition.proposedConfigHash
+    ) {
+      continuityIssues.push(`transition_resulting_execution_manifest_mismatch:${transition.id}`);
+    }
+
+    if (!predecessorLineage || predecessorLineage.actorId !== actor.id) {
+      continuityIssues.push(`transition_predecessor_lineage_invalid:${transition.id}`);
+    }
+    if (!resultingLineage || resultingLineage.actorId !== actor.id) {
+      continuityIssues.push(`transition_resulting_lineage_invalid:${transition.id}`);
+    } else {
+      if (resultingLineage.parentNodeId !== transition.predecessorLineageId) {
+        continuityIssues.push(`transition_lineage_parent_mismatch:${transition.id}`);
+      }
+      if (resultingLineage.kind !== transitionKindToLineageKind(transition.kind)) {
+        continuityIssues.push(`transition_lineage_kind_mismatch:${transition.id}`);
+      }
+    }
+
+    const acceptedEvent = storedEvents.find(
+      (event) => event.sourceKey === `continuity:${transition.id}:accepted`,
+    );
+    if (
+      !acceptedEvent ||
+      acceptedEvent.executionId !== transition.resultingExecutionId ||
+      acceptedEvent.actorId !== actor.id
+    ) {
+      continuityIssues.push(`transition_canonical_event_missing_or_mismatched:${transition.id}`);
+    }
+  }
+
+  const nonOriginLineage = lineage.filter((node) => node.kind !== 'ORIGIN');
+  const legacyLineageNodes = nonOriginLineage.filter(
+    (node) => node.kind !== 'FORK' && !governedLineageIds.has(node.id),
+  ).length;
+  const continuityCoverage =
+    nonOriginLineage.length === 0
+      ? 'origin-only'
+      : legacyLineageNodes === 0
+        ? 'governed'
+        : acceptedTransitions > 0
+          ? 'mixed'
+          : 'legacy';
+
+  let ancestryValid = true;
+  if (ancestry) {
+    if (ancestry.parentActorId === actor.id) {
+      ancestryValid = false;
+      continuityIssues.push('fork_ancestry_self_parent');
+    }
+
+    const [sourceLineage, sourceEvent, forkLineage] = await Promise.all([
+      db.lineageNode.findUnique({ where: { id: ancestry.sourceLineageId } }),
+      ancestry.sourceEventSequence !== null
+        ? db.actorEvent.findUnique({
+            where: {
+              actorId_sequence: {
+                actorId: ancestry.parentActorId,
+                sequence: ancestry.sourceEventSequence,
+              },
+            },
+          })
+        : Promise.resolve(null),
+      db.lineageNode.findFirst({
+        where: { actorId: actor.id, kind: 'FORK' },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ]);
+
+    if (!sourceLineage || sourceLineage.actorId !== ancestry.parentActorId) {
+      ancestryValid = false;
+      continuityIssues.push('fork_source_lineage_invalid');
+    }
+    if (!forkLineage || forkLineage.parentNodeId !== ancestry.sourceLineageId) {
+      ancestryValid = false;
+      continuityIssues.push('fork_lineage_parent_mismatch');
+    }
+    if (ancestry.sourceEventSequence !== null) {
+      if (
+        !sourceEvent ||
+        (ancestry.sourceEventHash !== null && sourceEvent.hash !== ancestry.sourceEventHash)
+      ) {
+        ancestryValid = false;
+        continuityIssues.push('fork_source_event_invalid');
+      }
+    }
+  }
+
+  for (const continuityIssue of continuityIssues) {
+    issues.push(`continuity:${continuityIssue}`);
+  }
+
   const registrySignaturesValid = registryInvalid === 0 && registryMissing === 0;
   const hostReceiptsValid = receiptInvalid === 0;
-  const valid = schemaValid && hashChainValid && registrySignaturesValid && hostReceiptsValid;
+  const continuityValid = continuityIssues.length === 0;
+  const valid =
+    schemaValid &&
+    hashChainValid &&
+    registrySignaturesValid &&
+    hostReceiptsValid &&
+    continuityValid;
 
   return {
-    verificationVersion: 'noeone.verify.v1' as const,
+    verificationVersion: 'noeone.verify.v2' as const,
     actorId: actor.id,
     handle: actor.handle,
     canonicalLineageId: actor.canonicalLineageId,
@@ -237,6 +417,30 @@ export async function verifyActorCareer(actorId: string) {
       checked: storedReceipts.length,
       valid: receiptValid,
       invalid: receiptInvalid,
+    },
+    continuity: {
+      valid: continuityValid,
+      coverage: continuityCoverage,
+      currentExecutionId: activeExecutions[0]?.id ?? null,
+      canonicalLineageId: canonicalLineage[0]?.id ?? null,
+      transitions: {
+        checked: transitions.length,
+        accepted: acceptedTransitions,
+        superseded: supersededTransitions,
+        rejected: rejectedTransitions,
+        pending: pendingTransitions,
+        legacyLineageNodes,
+      },
+      ancestry: ancestry
+        ? {
+            valid: ancestryValid,
+            parentActorId: ancestry.parentActorId,
+            sourceLineageId: ancestry.sourceLineageId,
+            sourceEventSequence: ancestry.sourceEventSequence,
+            sourceEventHash: ancestry.sourceEventHash,
+          }
+        : null,
+      issues: continuityIssues,
     },
     reason: issues[0] ?? null,
     issues,
