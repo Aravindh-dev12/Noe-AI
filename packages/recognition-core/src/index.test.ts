@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
 
 import {
   buildReplacementResistanceCurve,
@@ -24,9 +25,9 @@ function observations(
 describe('wilsonInterval', () => {
   it('returns a bounded 95% interval', () => {
     const estimate = wilsonInterval(50, 100);
-    expect(estimate.rate).toBe(0.5);
-    expect(estimate.lower95).toBeGreaterThan(0.39);
-    expect(estimate.upper95).toBeLessThan(0.61);
+    assert.equal(estimate.rate, 0.5);
+    assert.ok(estimate.lower95 > 0.39);
+    assert.ok(estimate.upper95 < 0.61);
   });
 });
 
@@ -38,7 +39,10 @@ describe('buildReplacementResistanceCurve', () => {
       ...observations(0.2, 4, 10),
     ]);
 
-    expect(curve.map((point) => point.monotoneRate)).toEqual([0.9, 0.7, 0.4]);
+    assert.deepEqual(
+      curve.map((point) => point.monotoneRate),
+      [0.9, 0.7, 0.4],
+    );
   });
 
   it('uses isotonic pooling when sampling noise violates monotonicity', () => {
@@ -49,10 +53,10 @@ describe('buildReplacementResistanceCurve', () => {
       ...observations(0.3, 2, 10),
     ]);
 
-    expect(curve[0]!.monotoneRate).toBe(0.8);
-    expect(curve[1]!.monotoneRate).toBe(0.6);
-    expect(curve[2]!.monotoneRate).toBe(0.6);
-    expect(curve[3]!.monotoneRate).toBe(0.2);
+    assert.equal(curve[0]!.monotoneRate, 0.8);
+    assert.equal(curve[1]!.monotoneRate, 0.6);
+    assert.equal(curve[2]!.monotoneRate, 0.6);
+    assert.equal(curve[3]!.monotoneRate, 0.2);
   });
 });
 
@@ -65,9 +69,9 @@ describe('estimateContinuityPremium50', () => {
     ]);
 
     const estimate = estimateContinuityPremium50(curve);
-    expect(estimate.status).toBe('ESTIMATED');
+    assert.equal(estimate.status, 'ESTIMATED');
     if (estimate.status === 'ESTIMATED') {
-      expect(estimate.capabilityDelta).toBeCloseTo(0.166666, 4);
+      assert.ok(Math.abs(estimate.capabilityDelta - 0.1666666667) < 0.0001);
     }
   });
 
@@ -77,7 +81,7 @@ describe('estimateContinuityPremium50', () => {
       ...observations(0.2, 7, 10),
     ]);
 
-    expect(estimateContinuityPremium50(curve)).toEqual({
+    assert.deepEqual(estimateContinuityPremium50(curve), {
       status: 'ABOVE_OBSERVED_RANGE',
       lowerBound: 0.2,
     });
@@ -89,7 +93,7 @@ describe('estimateContinuityPremium50', () => {
       ...observations(0.2, 2, 10),
     ]);
 
-    expect(estimateContinuityPremium50(curve)).toEqual({
+    assert.deepEqual(estimateContinuityPremium50(curve), {
       status: 'BELOW_OBSERVED_RANGE',
       upperBound: 0,
     });
@@ -98,7 +102,7 @@ describe('estimateContinuityPremium50', () => {
 
 describe('migrationRetention', () => {
   it('returns post/pre demand and avoids division by zero', () => {
-    expect(migrationRetention(100, 82)).toBe(0.82);
-    expect(migrationRetention(0, 0)).toBeNull();
+    assert.equal(migrationRetention(100, 82), 0.82);
+    assert.equal(migrationRetention(0, 0), null);
   });
 });
