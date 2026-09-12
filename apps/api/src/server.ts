@@ -12,6 +12,7 @@ import { actorRoutes } from './routes/actors.js';
 import { authRoutes } from './routes/auth.js';
 import { continuityRoutes } from './routes/continuity.js';
 import { hostRoutes } from './routes/hosts.js';
+import { institutionalRoutes } from './routes/institutional.js';
 import { matchRoutes } from './routes/matches.js';
 import { passportRoutes } from './routes/passports.js';
 import { publicRoutes } from './routes/public.js';
@@ -88,6 +89,7 @@ await actorRoutes(app);
 await continuityRoutes(app);
 await matchRoutes(app);
 await hostRoutes(app);
+await institutionalRoutes(app);
 await verificationRoutes(app);
 await passportRoutes(app);
 
