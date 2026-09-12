@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { appendCanonicalActorEvent } from './events.js';
 import { db } from './index.js';
@@ -11,7 +11,7 @@ const executionId = `exec_test_${suffix}`;
 const lineageId = `lin_test_${suffix}`;
 const hostId = `host_test_${suffix}`;
 
-async function setup() {
+beforeAll(async () => {
   await db.host.create({
     data: {
       id: hostId,
@@ -52,7 +52,7 @@ async function setup() {
       createdAt: new Date(),
     },
   });
-}
+});
 
 afterAll(async () => {
   await db.actor.deleteMany({ where: { id: actorId } });
@@ -60,46 +60,42 @@ afterAll(async () => {
   await db.$disconnect();
 });
 
-describe('appendCanonicalActorEvent', () => {
+describe('canonical actor persistence', () => {
   it('deduplicates retries by sourceKey and serializes concurrent appends', async () => {
-    await setup();
+    const sourceKey = `test:${suffix}:origin`;
+    const eventInput = {
+      actorId,
+      executionId,
+      type: 'test.origin',
+      sourceKey,
+      hostId,
+      environmentVersion: 'test@1',
+      issuer: 'integration-test',
+      payload: { step: 1 },
+    } as const;
 
     const first = await db.$transaction((tx) =>
-      appendCanonicalActorEvent(
-        tx,
-        {
-          actorId,
-          executionId,
-          type: 'test.origin',
-          sourceKey: `test:${suffix}:origin`,
-          hostId,
-          environmentVersion: 'test@1',
-          issuer: 'integration-test',
-          payload: { step: 1 },
-        },
-        SIGNING_SECRET,
-      ),
+      appendCanonicalActorEvent(tx, eventInput, SIGNING_SECRET),
     );
-
     const retry = await db.$transaction((tx) =>
-      appendCanonicalActorEvent(
-        tx,
-        {
-          actorId,
-          executionId,
-          type: 'test.origin',
-          sourceKey: `test:${suffix}:origin`,
-          hostId,
-          environmentVersion: 'test@1',
-          issuer: 'integration-test',
-          payload: { step: 1 },
-        },
-        SIGNING_SECRET,
-      ),
+      appendCanonicalActorEvent(tx, eventInput, SIGNING_SECRET),
     );
 
     expect(retry.id).toBe(first.id);
-    expect(await db.actorEvent.count({ where: { sourceKey: `test:${suffix}:origin` } })).toBe(1);
+    expect(await db.actorEvent.count({ where: { sourceKey } })).toBe(1);
+
+    await expect(
+      db.$transaction((tx) =>
+        appendCanonicalActorEvent(
+          tx,
+          {
+            ...eventInput,
+            payload: { step: 999 },
+          },
+          SIGNING_SECRET,
+        ),
+      ),
+    ).rejects.toThrow(/conflicting canonical data/);
 
     await Promise.all([
       db.$transaction((tx) =>
@@ -145,5 +141,62 @@ describe('appendCanonicalActorEvent', () => {
     expect(events[0]!.previousEventHash).toBeNull();
     expect(events[1]!.previousEventHash).toBe(events[0]!.hash);
     expect(events[2]!.previousEventHash).toBe(events[1]!.hash);
+  });
+
+  it('enforces exactly one active execution per actor at the database layer', async () => {
+    await expect(
+      db.actorExecution.create({
+        data: {
+          id: `exec_second_active_${suffix}`,
+          actorId,
+          provider: 'mock',
+          model: 'second-active-model',
+          configHash: `test:${suffix}:second-active`,
+          startedAt: new Date(),
+        },
+      }),
+    ).rejects.toThrow();
+
+    const historical = await db.actorExecution.create({
+      data: {
+        id: `exec_historical_${suffix}`,
+        actorId,
+        provider: 'mock',
+        model: 'historical-model',
+        configHash: `test:${suffix}:historical`,
+        startedAt: new Date(Date.now() - 60_000),
+        endedAt: new Date(),
+      },
+    });
+
+    expect(historical.endedAt).not.toBeNull();
+  });
+
+  it('enforces exactly one canonical lineage node per actor at the database layer', async () => {
+    await expect(
+      db.lineageNode.create({
+        data: {
+          id: `lin_second_canonical_${suffix}`,
+          actorId,
+          parentNodeId: lineageId,
+          kind: 'MIGRATION',
+          canonical: true,
+          createdAt: new Date(),
+        },
+      }),
+    ).rejects.toThrow();
+
+    const researchFork = await db.lineageNode.create({
+      data: {
+        id: `lin_noncanonical_${suffix}`,
+        actorId,
+        parentNodeId: lineageId,
+        kind: 'FORK',
+        canonical: false,
+        createdAt: new Date(),
+      },
+    });
+
+    expect(researchFork.canonical).toBe(false);
   });
 });
