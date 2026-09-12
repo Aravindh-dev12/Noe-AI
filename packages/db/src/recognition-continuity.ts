@@ -325,8 +325,13 @@ export async function recordContinuityRecognitionAssessment(
   const target = await resolveTarget(input);
   await requireEvidence(input.sourceEvidenceArtifactId);
 
-  const assessedAt = input.assessedAt ?? new Date();
-  const validUntil = input.validUntil ?? null;
+  // Idempotency must survive server-generated timestamps. A retry that omits
+  // assessedAt/validUntil inherits the persisted values before recomputing the
+  // semantic basis; explicit caller changes still produce a conflict.
+  const existing = await assessmentByKey(input.idempotencyKey);
+  const assessedAt = input.assessedAt ?? existing?.assessedAt ?? new Date();
+  const validUntil =
+    input.validUntil === undefined ? (existing?.validUntil ?? null) : input.validUntil;
   if (validUntil && validUntil <= assessedAt) {
     throw new RecognitionContinuityValidationError('validUntil must be later than assessedAt.');
   }
@@ -351,7 +356,6 @@ export async function recordContinuityRecognitionAssessment(
   };
 
   const basisDigest = sha256(assessmentBasis(normalized));
-  const existing = await assessmentByKey(input.idempotencyKey);
   if (existing) {
     if (existing.basisDigest !== basisDigest) {
       throw new RecognitionContinuityConflictError('Recognition idempotency key was reused.');
