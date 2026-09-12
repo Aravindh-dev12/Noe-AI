@@ -1,0 +1,45 @@
+name: pr19-one-shot-fix
+
+on:
+  push:
+    branches:
+      - research/institutional-succession-20260912
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: research/institutional-succession-20260912
+          fetch-depth: 0
+
+      - name: Apply exact parser cleanup
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('packages/db/src/institutional-succession.ts')
+          text = path.read_text()
+          old = '  return value as ActivationBasis;'
+          new = '  return value;'
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'expected exactly one parser assertion, found {count}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Remove one-shot workflow and commit
+        run: |
+          git config user.name "NOEONE CI"
+          git config user.email "actions@users.noreply.github.com"
+          git rm .github/workflows/pr19-one-shot-fix.yml
+          git add packages/db/src/institutional-succession.ts
+          git diff --cached --check
+          git commit -m "fix(db): remove redundant activation basis assertion"
+          git push origin HEAD:research/institutional-succession-20260912
