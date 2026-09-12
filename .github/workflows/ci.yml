@@ -42,8 +42,12 @@ jobs:
       REDIS_URL: redis://localhost:6379
       ADMIN_API_KEY: ci-only-admin-key-with-more-than-32-characters
       EVENT_SIGNING_SECRET: ci-only-event-secret-with-more-than-32-characters
+      BETTER_AUTH_SECRET: ci-only-better-auth-secret-with-more-than-32-characters
+      BETTER_AUTH_URL: http://localhost:4000
       CORS_ORIGINS: http://localhost:3000
       TRUST_PROXY: "false"
+      USER_MODEL_ALLOWLIST: mock:nova-seed-v1,mock:echo-seed-v1
+      MAX_USER_ACTORS: 10
       ONBAE_API_URL: http://localhost:4000
       NEXT_PUBLIC_API_URL: http://localhost:4000
       API_PORT: 4000
@@ -59,9 +63,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
-      - name: Install frozen dependency graph
-        run: pnpm install --frozen-lockfile
+      - name: Bootstrap dependency graph
+        run: pnpm install --no-frozen-lockfile
+      - name: Upload candidate lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: pnpm-lock-candidate
+          path: pnpm-lock.yaml
+          retention-days: 1
       - name: Generate Prisma client
         run: pnpm db:generate
       - name: Apply committed database migrations
