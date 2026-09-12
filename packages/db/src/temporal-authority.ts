@@ -6,6 +6,7 @@ import type {
 } from '@prisma/client';
 
 import { AuthorityConflictError, type AuthorityEvaluation, type AuthorityRequest } from './authority.js';
+import { actorControlStateAt, controlQuarantineReason } from './control-operational.js';
 import { db } from './index.js';
 
 export type TemporalAuthorityGrant = AuthorityGrant & {
@@ -124,6 +125,18 @@ export function evaluateTemporalAuthorityChainRecords(
   };
 }
 
+function applyControlState(
+  evaluation: AuthorityEvaluation,
+  quarantineReason: string | null,
+): AuthorityEvaluation {
+  if (!quarantineReason) return evaluation;
+  return {
+    ...evaluation,
+    allowed: false,
+    reasons: [...evaluation.reasons, quarantineReason],
+  };
+}
+
 async function loadTemporalAuthorityChain(
   tx: Prisma.TransactionClient,
   grantId: string,
@@ -158,9 +171,12 @@ export async function evaluateAuthorityGrantAt(
   grantId: string,
   request: AuthorityRequest,
 ): Promise<AuthorityEvaluation> {
+  const at = request.at ?? new Date();
   return db.$transaction(async (tx) => {
     const chain = await loadTemporalAuthorityChain(tx, grantId);
-    return evaluateTemporalAuthorityChainRecords(chain, request);
+    const evaluation = evaluateTemporalAuthorityChainRecords(chain, { ...request, at });
+    const control = await actorControlStateAt(tx, evaluation.subjectActorId, at);
+    return applyControlState(evaluation, controlQuarantineReason(control));
   });
 }
 
@@ -179,6 +195,8 @@ export async function evaluateActorAuthorityAt(
     if (!actor) {
       throw Object.assign(new Error('Actor not found.'), { statusCode: 404 });
     }
+    const control = await actorControlStateAt(tx, actorId, at);
+    const quarantineReason = controlQuarantineReason(control);
 
     // Do not filter on the current status projection. A grant that is revoked
     // today may still have covered an action before its revocation transition.
@@ -201,10 +219,13 @@ export async function evaluateActorAuthorityAt(
     for (const candidate of candidates) {
       const chain = await loadTemporalAuthorityChain(tx, candidate.id);
       evaluations.push(
-        evaluateTemporalAuthorityChainRecords(chain, {
-          ...request,
-          at,
-        }),
+        applyControlState(
+          evaluateTemporalAuthorityChainRecords(chain, {
+            ...request,
+            at,
+          }),
+          quarantineReason,
+        ),
       );
     }
 

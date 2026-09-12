@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ContinuityTransition, Prisma } from '@prisma/client';
 
+import { assertActorControlOperationalAt } from './control-operational.js';
 import { appendCanonicalActorEvent } from './events.js';
 import { db } from './index.js';
 
@@ -84,6 +85,8 @@ export async function proposeMigration(
     if (actor.status !== 'ACTIVE') {
       throw new ContinuityConflictError('Only active actors can change execution.');
     }
+    const proposedAt = input.now ?? new Date();
+    await assertActorControlOperationalAt(tx, actor.id, proposedAt);
 
     const canonicalLineage = await tx.lineageNode.findUnique({
       where: { id: actor.canonicalLineageId },
@@ -127,7 +130,6 @@ export async function proposeMigration(
       return existing;
     }
 
-    const proposedAt = input.now ?? new Date();
     return tx.continuityTransition.create({
       data: {
         id: `ctr_${randomUUID()}`,
@@ -255,6 +257,7 @@ export async function acceptContinuityTransition(
     if (actor.status !== 'ACTIVE') {
       throw new ContinuityConflictError('Only active actors can accept continuity transitions.');
     }
+    await assertActorControlOperationalAt(tx, actor.id, now);
 
     const predecessorLineage = await tx.lineageNode.findUnique({
       where: { id: transition.predecessorLineageId },
