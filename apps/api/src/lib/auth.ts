@@ -14,6 +14,16 @@ export type Principal =
       name: string;
     };
 
+export function trustedAuthHeaders(request: FastifyRequest): Headers {
+  const headers = fromNodeHeaders(request.headers);
+  // Always overwrite the internal Better Auth IP header with Fastify's server-derived
+  // address. This prevents clients from spoofing the value that Better Auth uses for
+  // rate limiting/security telemetry while still supporting trusted proxy resolution
+  // through Fastify's `trustProxy` setting.
+  headers.set('x-onbae-client-ip', request.ip);
+  return headers;
+}
+
 export function hasValidAdminCredential(request: FastifyRequest): boolean {
   const provided = request.headers['x-onbae-admin-key'];
   if (typeof provided !== 'string') return false;
@@ -43,7 +53,7 @@ export async function getPrincipal(request: FastifyRequest): Promise<Principal |
   }
 
   const session = await auth.api.getSession({
-    headers: fromNodeHeaders(request.headers),
+    headers: trustedAuthHeaders(request),
   });
 
   if (!session) return null;
