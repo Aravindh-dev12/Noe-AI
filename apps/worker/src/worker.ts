@@ -81,7 +81,9 @@ async function appendCanonicalEvent(
       payload: event.payload as Prisma.InputJsonValue,
       issuer: event.provenance.issuer,
       signature,
-      previousEventHash: event.provenance.previousEventHash,
+      ...(event.provenance.previousEventHash
+        ? { previousEventHash: event.provenance.previousEventHash }
+        : {}),
       hash: event.hash,
       canonicalStatus: 'ACCEPTED',
     },
@@ -134,19 +136,17 @@ async function executeMatch(job: Job) {
     throw new Error('Both actors require an active execution.');
   }
 
+  const apiKeyA = providerApiKey(executionA.provider);
+  const apiKeyB = providerApiKey(executionB.provider);
   const providerA = createProvider({
     provider: executionA.provider,
     model: executionA.model,
-    ...(providerApiKey(executionA.provider)
-      ? { apiKey: providerApiKey(executionA.provider) }
-      : {}),
+    ...(apiKeyA ? { apiKey: apiKeyA } : {}),
   });
   const providerB = createProvider({
     provider: executionB.provider,
     model: executionB.model,
-    ...(providerApiKey(executionB.provider)
-      ? { apiKey: providerApiKey(executionB.provider) }
-      : {}),
+    ...(apiKeyB ? { apiKey: apiKeyB } : {}),
   });
 
   await db.match.update({
