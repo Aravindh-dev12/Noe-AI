@@ -15,4 +15,5 @@ if (process.env.NODE_ENV !== 'production') {
 export * from './events.js';
 export * from './host-receipts.js';
 export * from './continuity.js';
+export * from './institutional.js';
 export * from '@prisma/client';
