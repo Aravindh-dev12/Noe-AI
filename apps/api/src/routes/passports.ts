@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { normalizeHandle } from '@onbae/actor-core';
-import { db, verifyInstitutionalState } from '@onbae/db';
+import { db, verifyAuthorityState, verifyInstitutionalState } from '@onbae/db';
 import { z } from 'zod';
 
 import { ActorVerificationTooLargeError, verifyActorCareer } from '../lib/actor-verification.js';
@@ -61,6 +61,7 @@ export async function passportRoutes(app: FastifyInstance) {
             hostReceipts: true,
             evidenceBindings: true,
             debtorCommitments: true,
+            authorityGrants: true,
             followers: true,
             matchesA: true,
             matchesB: true,
@@ -76,26 +77,49 @@ export async function passportRoutes(app: FastifyInstance) {
     }
 
     try {
-      const [verification, institutionalVerification, commitmentGroups, validationGroups, oldestOpen] =
-        await Promise.all([
-          verifyActorCareer(actor.id),
-          verifyInstitutionalState(actor.id),
-          db.commitment.groupBy({
-            by: ['status'],
-            where: { debtorActorId: actor.id },
-            _count: { _all: true },
-          }),
-          db.evidenceValidation.groupBy({
-            by: ['status'],
-            where: { artifact: { bindings: { some: { actorId: actor.id } } } },
-            _count: { _all: true },
-          }),
-          db.commitment.findFirst({
-            where: { debtorActorId: actor.id, status: 'OPEN' },
-            orderBy: { openedAt: 'asc' },
-            select: { openedAt: true, dueAt: true },
-          }),
-        ]);
+      const [
+        verification,
+        institutionalVerification,
+        authorityVerification,
+        commitmentGroups,
+        validationGroups,
+        authorityGroups,
+        oldestOpen,
+        nextAuthorityExpiry,
+      ] = await Promise.all([
+        verifyActorCareer(actor.id),
+        verifyInstitutionalState(actor.id),
+        verifyAuthorityState(actor.id),
+        db.commitment.groupBy({
+          by: ['status'],
+          where: { debtorActorId: actor.id },
+          _count: { _all: true },
+        }),
+        db.evidenceValidation.groupBy({
+          by: ['status'],
+          where: { artifact: { bindings: { some: { actorId: actor.id } } } },
+          _count: { _all: true },
+        }),
+        db.authorityGrant.groupBy({
+          by: ['status'],
+          where: { subjectActorId: actor.id },
+          _count: { _all: true },
+        }),
+        db.commitment.findFirst({
+          where: { debtorActorId: actor.id, status: 'OPEN' },
+          orderBy: { openedAt: 'asc' },
+          select: { openedAt: true, dueAt: true },
+        }),
+        db.authorityGrant.findFirst({
+          where: {
+            subjectActorId: actor.id,
+            status: 'ACTIVE',
+            expiresAt: { not: null },
+          },
+          orderBy: { expiresAt: 'asc' },
+          select: { expiresAt: true },
+        }),
+      ]);
 
       if (!verification) {
         return reply.code(404).send({ error: 'actor_not_found' });
@@ -107,9 +131,12 @@ export async function passportRoutes(app: FastifyInstance) {
       const validations = Object.fromEntries(
         validationGroups.map((group) => [group.status.toLowerCase(), group._count._all]),
       );
+      const authorities = Object.fromEntries(
+        authorityGroups.map((group) => [group.status.toLowerCase(), group._count._all]),
+      );
 
       return {
-        passportVersion: 'noeone.actor-passport.v3',
+        passportVersion: 'noeone.actor-passport.v4',
         actor: {
           id: actor.id,
           handle: actor.handle,
@@ -135,6 +162,13 @@ export async function passportRoutes(app: FastifyInstance) {
           commitmentsByStatus: commitments,
           oldestOpenCommitment: oldestOpen,
           verification: institutionalVerification,
+        },
+        authority: {
+          grantCount: actor._count.authorityGrants,
+          grantsByStatus: authorities,
+          effectiveActiveCount: authorityVerification.effectiveActiveCount,
+          nextRecordedExpiry: nextAuthorityExpiry?.expiresAt ?? null,
+          verification: authorityVerification,
         },
         career: {
           canonicalEvents: actor._count.events,
