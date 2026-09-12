@@ -29,4 +29,5 @@ export * from './external-state-continuity.js';
 export * from './transition-clearing.js';
 export * from './intent-continuity.js';
 export * from './actor-resolution.js';
+export * from './actor-resolution-operations.js';
 export * from '@prisma/client';
