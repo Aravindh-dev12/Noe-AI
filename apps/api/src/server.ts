@@ -10,6 +10,7 @@ import { env } from './env.js';
 import { matchQueue, redis } from './lib/queue.js';
 import { actorRoutes } from './routes/actors.js';
 import { authRoutes } from './routes/auth.js';
+import { continuityRoutes } from './routes/continuity.js';
 import { hostRoutes } from './routes/hosts.js';
 import { matchRoutes } from './routes/matches.js';
 import { passportRoutes } from './routes/passports.js';
@@ -84,6 +85,7 @@ app.setErrorHandler((error: unknown, request, reply) => {
 await authRoutes(app);
 await publicRoutes(app);
 await actorRoutes(app);
+await continuityRoutes(app);
 await matchRoutes(app);
 await hostRoutes(app);
 await verificationRoutes(app);
