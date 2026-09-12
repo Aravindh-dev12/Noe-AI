@@ -2,15 +2,17 @@ import type { FastifyInstance } from 'fastify';
 import {
   ACTOR_RESOLUTION_DISPOSITIONS,
   ACTOR_RESOLUTION_TRIGGERS,
-  closeActorResolutionCase,
+  closeActorResolutionCaseAtomic,
+  confirmActorResolutionItemAction,
   discoverActorResolutionInventory,
-  freezeActorResolutionCase,
+  freezeActorResolutionCaseAtomic,
   getActorResolutionCase,
   getActorResolutionSummary,
   openActorResolutionCase,
-  recordActorResolutionItemDecision,
+  recordActorResolutionDecisionSafely,
   requestActorResolutionItemAction,
   verifyActorResolutionCase,
+  verifyActorResolutionConfirmations,
 } from '@onbae/db';
 import { z } from 'zod';
 
@@ -57,6 +59,18 @@ const decisionSchema = z.object({
   decidedByRef: z.string().min(1).max(500).optional(),
   reason: z.string().max(1000).optional(),
   occurredAt: z.coerce.date().optional(),
+  idempotencyKey: z.string().min(8).max(240),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+});
+
+const confirmationSchema = z.object({
+  decisionId: z.string().min(1).max(160),
+  evidenceArtifactId: z.string().min(1).max(200),
+  confirmerType: z.string().min(1).max(240),
+  confirmerRef: z.string().min(1).max(500).optional(),
+  externalFramework: z.string().min(1).max(240).optional(),
+  externalReference: z.string().min(1).max(500).optional(),
+  confirmedAt: z.coerce.date().optional(),
   idempotencyKey: z.string().min(8).max(240),
   metadata: z.record(z.string(), z.unknown()).default({}),
 });
@@ -111,7 +125,17 @@ export async function actorResolutionRoutes(app: FastifyInstance) {
   app.get('/v1/resolutions/:caseId/verify', async (request) => {
     assertAdmin(request);
     const params = caseIdParams.parse(request.params);
-    return verifyActorResolutionCase(params.caseId);
+    const [core, confirmations] = await Promise.all([
+      verifyActorResolutionCase(params.caseId),
+      verifyActorResolutionConfirmations(params.caseId),
+    ]);
+    return {
+      version: 'noeone.actor-resolution-verification.v2',
+      caseId: params.caseId,
+      verified: core.verified && confirmations.verified,
+      core,
+      confirmations,
+    };
   });
 
   app.post('/v1/resolutions/:caseId/discover', async (request) => {
@@ -124,7 +148,7 @@ export async function actorResolutionRoutes(app: FastifyInstance) {
     assertAdmin(request);
     const params = caseIdParams.parse(request.params);
     const input = freezeSchema.parse(request.body);
-    return freezeActorResolutionCase({
+    return freezeActorResolutionCaseAtomic({
       caseId: params.caseId,
       decidedByType: input.decidedByType,
       idempotencyKey: input.idempotencyKey,
@@ -153,7 +177,7 @@ export async function actorResolutionRoutes(app: FastifyInstance) {
     assertAdmin(request);
     const params = itemIdParams.parse(request.params);
     const input = decisionSchema.parse(request.body);
-    const result = await recordActorResolutionItemDecision({
+    const result = await recordActorResolutionDecisionSafely({
       itemId: params.itemId,
       disposition: input.disposition,
       decidedByType: input.decidedByType,
@@ -176,11 +200,34 @@ export async function actorResolutionRoutes(app: FastifyInstance) {
     return reply.code(result.replayed ? 200 : 201).send(result);
   });
 
+  app.post('/v1/resolution-items/:itemId/confirmations', async (request, reply) => {
+    assertAdmin(request);
+    const params = itemIdParams.parse(request.params);
+    const input = confirmationSchema.parse(request.body);
+    const result = await confirmActorResolutionItemAction({
+      itemId: params.itemId,
+      decisionId: input.decisionId,
+      evidenceArtifactId: input.evidenceArtifactId,
+      confirmerType: input.confirmerType,
+      idempotencyKey: input.idempotencyKey,
+      metadata: input.metadata,
+      ...(input.confirmerRef !== undefined ? { confirmerRef: input.confirmerRef } : {}),
+      ...(input.externalFramework !== undefined
+        ? { externalFramework: input.externalFramework }
+        : {}),
+      ...(input.externalReference !== undefined
+        ? { externalReference: input.externalReference }
+        : {}),
+      ...(input.confirmedAt !== undefined ? { confirmedAt: input.confirmedAt } : {}),
+    });
+    return reply.code(result.replayed ? 200 : 201).send(result);
+  });
+
   app.post('/v1/resolutions/:caseId/close', async (request) => {
     assertAdmin(request);
     const params = caseIdParams.parse(request.params);
     const input = closeSchema.parse(request.body);
-    return closeActorResolutionCase({
+    return closeActorResolutionCaseAtomic({
       caseId: params.caseId,
       finalDisposition: input.finalDisposition,
       decidedByType: input.decidedByType,
