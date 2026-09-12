@@ -12,26 +12,52 @@ export async function bootstrapCoreRecords() {
     },
   });
 
-  await db.environment.upsert({
-    where: {
-      hostId_slug_version: {
+  await Promise.all([
+    db.environment.upsert({
+      where: {
+        hostId_slug_version: {
+          hostId: host.id,
+          slug: 'triad',
+          version: '1.0.0',
+        },
+      },
+      update: { status: 'ACTIVE' },
+      create: {
+        id: 'env_triad_v1',
         hostId: host.id,
         slug: 'triad',
+        displayName: 'Triad',
         version: '1.0.0',
+        status: 'ACTIVE',
+        config: {
+          rounds: 3,
+          description: 'Best-of-three deterministic actor competition.',
+        },
       },
-    },
-    update: { status: 'ACTIVE' },
-    create: {
-      id: 'env_triad_v1',
-      hostId: host.id,
-      slug: 'triad',
-      displayName: 'Triad',
-      version: '1.0.0',
-      status: 'ACTIVE',
-      config: {
-        rounds: 3,
-        description: 'Best-of-three deterministic actor competition.',
+    }),
+    db.environment.upsert({
+      where: {
+        hostId_slug_version: {
+          hostId: host.id,
+          slug: 'bargain',
+          version: '1.0.0',
+        },
       },
-    },
-  });
+      update: { status: 'ACTIVE' },
+      create: {
+        id: 'env_bargain_v1',
+        hostId: host.id,
+        slug: 'bargain',
+        displayName: 'Bargain',
+        version: '1.0.0',
+        status: 'ACTIVE',
+        config: {
+          privateValuations: true,
+          maxOffers: 6,
+          description:
+            'Deterministic mixed-motive negotiation with private utilities and binding agreements.',
+        },
+      },
+    }),
+  ]);
 }
