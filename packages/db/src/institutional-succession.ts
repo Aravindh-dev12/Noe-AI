@@ -1237,7 +1237,7 @@ export async function getActorInstitutionalSuccessionSummary(actorId: string) {
 
 function parseActivationBasis(value: Prisma.JsonValue | null): ActivationBasis | null {
   if (!value || Array.isArray(value) || typeof value !== 'object') return null;
-  return value as ActivationBasis;
+  return value;
 }
 
 export async function verifyInstitutionalSuccession(actorId: string) {
