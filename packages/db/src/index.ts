@@ -19,4 +19,5 @@ export * from './institutional.js';
 export * from './authority.js';
 export * from './temporal-authority.js';
 export * from './accountability.js';
+export * from './dependency-exposure.js';
 export * from '@prisma/client';
