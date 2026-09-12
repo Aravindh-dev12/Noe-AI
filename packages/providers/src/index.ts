@@ -135,11 +135,10 @@ export class OpenAIProvider implements ModelProvider {
       throw new Error('OpenAI response did not contain output_text.');
     }
 
+    const usage = buildUsage(parsed.usage?.input_tokens, parsed.usage?.output_tokens);
     return {
       rawText: parsed.output_text,
-      ...(buildUsage(parsed.usage?.input_tokens, parsed.usage?.output_tokens)
-        ? { usage: buildUsage(parsed.usage?.input_tokens, parsed.usage?.output_tokens) }
-        : {}),
+      ...(usage ? { usage } : {}),
       providerMetadata: parsed.id ? { responseId: parsed.id } : {},
     };
   }
