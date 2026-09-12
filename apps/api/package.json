@@ -17,6 +17,7 @@
     "@onbae/actor-core": "workspace:*",
     "@onbae/db": "workspace:*",
     "@onbae/event-model": "workspace:*",
+    "better-auth": "^1.7.4",
     "bullmq": "^5.58.5",
     "fastify": "^5.5.0",
     "ioredis": "^5.7.0",
