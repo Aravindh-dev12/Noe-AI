@@ -33,6 +33,23 @@ describe('canonical events', () => {
     expect(reordered.hash).toBe(reorderedAgain.hash);
   });
 
+  it('binds the semantic source key into the event hash', () => {
+    const first = createActorEvent({
+      id: 'evt_source',
+      ...base,
+      sourceKey: 'match:1:actor:a:result',
+    });
+    const second = createActorEvent({
+      id: 'evt_source',
+      ...base,
+      sourceKey: 'match:2:actor:a:result',
+    });
+
+    expect(first.hash).not.toBe(second.hash);
+    expect(verifyEventHash(first)).toBe(true);
+    expect(verifyEventHash(second)).toBe(true);
+  });
+
   it('validates a linked event chain', () => {
     const first = createActorEvent({ id: 'evt_1', ...base });
     const second = createActorEvent({
