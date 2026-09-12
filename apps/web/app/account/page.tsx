@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 
+import './account.css';
 import { AccountConsole } from './account-console';
 
 export const metadata: Metadata = {
