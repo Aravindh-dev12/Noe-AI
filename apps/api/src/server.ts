@@ -9,6 +9,7 @@ import { bootstrapCoreRecords } from './bootstrap.js';
 import { env } from './env.js';
 import { matchQueue, redis } from './lib/queue.js';
 import { actorRoutes } from './routes/actors.js';
+import { authRoutes } from './routes/auth.js';
 import { matchRoutes } from './routes/matches.js';
 import { publicRoutes } from './routes/public.js';
 
@@ -18,8 +19,10 @@ const app = Fastify({
     redact: {
       paths: [
         'req.headers.authorization',
+        'req.headers.cookie',
         'req.headers.x-onbae-admin-key',
         'headers.authorization',
+        'headers.cookie',
         'headers.x-onbae-admin-key',
       ],
       censor: '[REDACTED]',
@@ -34,8 +37,10 @@ await app.register(helmet, {
 });
 await app.register(cors, {
   origin: env.CORS_ORIGINS,
-  credentials: false,
+  credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Onbae-Admin-Key'],
+  maxAge: 86_400,
 });
 await app.register(rateLimit, {
   max: 180,
@@ -65,6 +70,7 @@ app.setErrorHandler((error: unknown, request, reply) => {
   });
 });
 
+await authRoutes(app);
 await publicRoutes(app);
 await actorRoutes(app);
 await matchRoutes(app);
