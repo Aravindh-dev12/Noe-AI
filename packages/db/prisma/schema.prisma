@@ -76,6 +76,11 @@ enum CommitmentStatus {
   DISPUTED
 }
 
+enum AuthorityGrantStatus {
+  ACTIVE
+  REVOKED
+}
+
 model User {
   id            String   @id
   email         String   @unique
@@ -164,6 +169,7 @@ model Actor {
   evidenceBindings      ActorEvidenceBinding[]
   debtorCommitments     Commitment[]            @relation("commitment_debtor")
   creditorCommitments   Commitment[]            @relation("commitment_creditor")
+  authorityGrants       AuthorityGrant[]         @relation("authority_subject")
   followers             Follow[]
   subjectEdges          RelationshipEdge[]      @relation("relationship_subject")
   objectEdges           RelationshipEdge[]      @relation("relationship_object")
@@ -386,6 +392,7 @@ model EvidenceArtifact {
   validations           EvidenceValidation[]
   sourceCommitments     Commitment[]           @relation("commitment_source_evidence")
   commitmentTransitions CommitmentTransition[] @relation("commitment_transition_evidence")
+  authorityGrants       AuthorityGrant[]        @relation("authority_evidence")
 
   @@unique([issuer, digest])
   @@index([kind, observedAt])
@@ -470,11 +477,70 @@ model CommitmentTransition {
   occurredAt         DateTime          @default(now())
   metadata           Json              @default("{}")
 
-  commitment Commitment       @relation(fields: [commitmentId], references: [id], onDelete: Cascade)
+  commitment Commitment        @relation(fields: [commitmentId], references: [id], onDelete: Cascade)
   evidence   EvidenceArtifact? @relation("commitment_transition_evidence", fields: [evidenceArtifactId], references: [id], onDelete: Restrict)
 
   @@index([commitmentId, occurredAt])
   @@index([evidenceArtifactId])
+}
+
+model AuthorityGrant {
+  id                       String               @id
+  subjectActorId           String
+  parentGrantId            String?
+  grantorType              String
+  grantorRef               String
+  status                   AuthorityGrantStatus @default(ACTIVE)
+  actions                  String[]
+  resources                String[]
+  canRedelegate            Boolean              @default(false)
+  remainingDelegationDepth Int                  @default(0)
+  maxAmountMinor           String?
+  currency                 String?
+  notBefore                DateTime             @default(now())
+  expiresAt                DateTime?
+  externalFramework        String?
+  externalReference        String?
+  sourceEvidenceArtifactId String?
+  issuedByType             String
+  issuedById               String?
+  idempotencyKey           String               @unique
+  revokedAt                DateTime?
+  revokedByType            String?
+  revokedById              String?
+  revocationReason         String?
+  metadata                 Json                 @default("{}")
+  createdAt                DateTime             @default(now())
+  updatedAt                DateTime             @updatedAt
+
+  subject        Actor              @relation("authority_subject", fields: [subjectActorId], references: [id], onDelete: Restrict)
+  parent         AuthorityGrant?    @relation("authority_parent", fields: [parentGrantId], references: [id], onDelete: Restrict)
+  children       AuthorityGrant[]   @relation("authority_parent")
+  sourceEvidence EvidenceArtifact?  @relation("authority_evidence", fields: [sourceEvidenceArtifactId], references: [id], onDelete: Restrict)
+  transitions    AuthorityGrantTransition[]
+
+  @@index([subjectActorId, status, expiresAt])
+  @@index([parentGrantId])
+  @@index([grantorType, grantorRef])
+  @@index([externalFramework, externalReference])
+  @@index([sourceEvidenceArtifactId])
+}
+
+model AuthorityGrantTransition {
+  id             String               @id
+  grantId        String
+  fromStatus     AuthorityGrantStatus?
+  toStatus       AuthorityGrantStatus
+  reason         String?
+  decidedByType  String
+  decidedById    String?
+  idempotencyKey String               @unique
+  occurredAt     DateTime             @default(now())
+  metadata       Json                 @default("{}")
+
+  grant AuthorityGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+
+  @@index([grantId, occurredAt])
 }
 
 model Follow {
