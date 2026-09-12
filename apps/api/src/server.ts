@@ -25,7 +25,7 @@ const app = Fastify({
       censor: '[REDACTED]',
     },
   },
-  trustProxy: true,
+  trustProxy: env.TRUST_PROXY,
   requestIdHeader: 'x-request-id',
 });
 
@@ -33,7 +33,7 @@ await app.register(helmet, {
   contentSecurityPolicy: false,
 });
 await app.register(cors, {
-  origin: true,
+  origin: env.CORS_ORIGINS,
   credentials: false,
   methods: ['GET', 'POST', 'OPTIONS'],
 });
