@@ -22,8 +22,8 @@ function observations(
   }));
 }
 
-describe('wilsonInterval', () => {
-  it('returns a bounded 95% interval', () => {
+void describe('wilsonInterval', () => {
+  void it('returns a bounded 95% interval', () => {
     const estimate = wilsonInterval(50, 100);
     assert.equal(estimate.rate, 0.5);
     assert.ok(estimate.lower95 > 0.39);
@@ -31,8 +31,8 @@ describe('wilsonInterval', () => {
   });
 });
 
-describe('buildReplacementResistanceCurve', () => {
-  it('groups observations and preserves an already monotone curve', () => {
+void describe('buildReplacementResistanceCurve', () => {
+  void it('groups observations and preserves an already monotone curve', () => {
     const curve = buildReplacementResistanceCurve([
       ...observations(0, 9, 10),
       ...observations(0.1, 7, 10),
@@ -45,7 +45,7 @@ describe('buildReplacementResistanceCurve', () => {
     );
   });
 
-  it('uses isotonic pooling when sampling noise violates monotonicity', () => {
+  void it('uses isotonic pooling when sampling noise violates monotonicity', () => {
     const curve = buildReplacementResistanceCurve([
       ...observations(0, 8, 10),
       ...observations(0.1, 5, 10),
@@ -60,8 +60,8 @@ describe('buildReplacementResistanceCurve', () => {
   });
 });
 
-describe('estimateContinuityPremium50', () => {
-  it('interpolates the 50% crossing without extrapolating', () => {
+void describe('estimateContinuityPremium50', () => {
+  void it('interpolates the 50% crossing without extrapolating', () => {
     const curve = buildReplacementResistanceCurve([
       ...observations(0, 9, 10),
       ...observations(0.1, 7, 10),
@@ -75,7 +75,7 @@ describe('estimateContinuityPremium50', () => {
     }
   });
 
-  it('returns a lower bound when incumbent demand remains above 50%', () => {
+  void it('returns a lower bound when incumbent demand remains above 50%', () => {
     const curve = buildReplacementResistanceCurve([
       ...observations(0, 9, 10),
       ...observations(0.2, 7, 10),
@@ -87,7 +87,7 @@ describe('estimateContinuityPremium50', () => {
     });
   });
 
-  it('returns an upper bound when the incumbent is already below 50%', () => {
+  void it('returns an upper bound when the incumbent is already below 50%', () => {
     const curve = buildReplacementResistanceCurve([
       ...observations(0, 4, 10),
       ...observations(0.2, 2, 10),
@@ -100,8 +100,8 @@ describe('estimateContinuityPremium50', () => {
   });
 });
 
-describe('migrationRetention', () => {
-  it('returns post/pre demand and avoids division by zero', () => {
+void describe('migrationRetention', () => {
+  void it('returns post/pre demand and avoids division by zero', () => {
     assert.equal(migrationRetention(100, 82), 0.82);
     assert.equal(migrationRetention(0, 0), null);
   });
