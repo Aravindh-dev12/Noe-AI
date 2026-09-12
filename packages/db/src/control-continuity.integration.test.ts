@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 
 import {
   ControlContinuityConflictError,
+  assertActorControlOperationalAt,
   createActorControlPolicy,
   db,
   finalizeActorControlTransition,
@@ -125,7 +126,6 @@ async function approve(
 }
 
 afterAll(async () => {
-  // Raw control tables are intentionally removed in FK-safe order.
   await db.$executeRaw(Prisma.sql`
     DELETE FROM "ActorControlApproval"
     WHERE "transitionId" IN (
@@ -266,15 +266,22 @@ describe('actor control continuity', () => {
       new Date(t2.getTime() + 2_000),
       'quarantine-carol',
     );
+    const quarantineAt = new Date(t2.getTime() + 3_000);
     const quarantined = await finalizeActorControlTransition(
       quarantine.transition.id,
       registry,
-      new Date(t2.getTime() + 3_000),
+      quarantineAt,
     );
     expect(quarantined.accepted).toBe(true);
     expect(quarantined.epoch?.epoch).toBe(3);
     expect(quarantined.epoch?.state).toBe('QUARANTINED');
     expect(quarantined.epoch?.actorId).toBe(actorId);
+
+    await expect(
+      db.$transaction((tx) =>
+        assertActorControlOperationalAt(tx, actorId, new Date(quarantineAt.getTime() + 1)),
+      ),
+    ).rejects.toMatchObject({ statusCode: 423, code: 'actor_control_quarantined' });
 
     const restore = await proposeActorControlTransition({
       actorId,
@@ -306,6 +313,12 @@ describe('actor control continuity', () => {
     expect(restored.epoch?.state).toBe('ACTIVE');
     expect(restored.epoch?.controllerRef).toBe('owner-recovered');
     expect(restored.epoch?.actorId).toBe(actorId);
+
+    const operational = await db.$transaction((tx) =>
+      assertActorControlOperationalAt(tx, actorId, new Date(t4.getTime() + 1)),
+    );
+    expect(operational.operational).toBe(true);
+    expect(operational.epoch).toBe(4);
 
     const hostile = await proposeActorControlTransition({
       actorId,
