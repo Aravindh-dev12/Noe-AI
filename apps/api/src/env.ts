@@ -10,7 +10,7 @@ const rawEnvSchema = z.object({
   BETTER_AUTH_SECRET: z.string().min(32),
   BETTER_AUTH_URL: z.string().url().default('http://localhost:4000'),
   CORS_ORIGINS: z.string().default('http://localhost:3000'),
-  TRUST_PROXY: z.enum(['true', 'false']).default('false'),
+  TRUST_PROXY: z.string().default('false'),
   USER_MODEL_ALLOWLIST: z.string().default('mock:nova-seed-v1,mock:echo-seed-v1'),
   MAX_USER_ACTORS: z.coerce.number().int().min(1).max(100).default(10),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
@@ -28,6 +28,28 @@ const corsOrigins = parsed.CORS_ORIGINS.split(',')
 
 if (parsed.NODE_ENV === 'production' && corsOrigins.length === 0) {
   throw new Error('At least one CORS_ORIGINS entry is required in production.');
+}
+
+function parseTrustProxy(value: string): boolean | string {
+  const normalized = value.trim();
+  if (normalized === '' || normalized === 'false') return false;
+
+  if (normalized === 'true') {
+    if (parsed.NODE_ENV === 'production') {
+      throw new Error(
+        'TRUST_PROXY=true is unsafe in production. Configure the exact reverse-proxy IP/CIDR list instead.',
+      );
+    }
+    return true;
+  }
+
+  const entries = normalized
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  if (entries.length === 0) return false;
+  return entries.join(',');
 }
 
 const userModels = parsed.USER_MODEL_ALLOWLIST.split(',')
@@ -52,6 +74,6 @@ export const env = {
   ...parsed,
   ADMIN_API_KEY: parsed.ADMIN_API_KEY ?? 'development-admin-key-change-me-00000000',
   CORS_ORIGINS: corsOrigins,
-  TRUST_PROXY: parsed.TRUST_PROXY === 'true',
+  TRUST_PROXY: parseTrustProxy(parsed.TRUST_PROXY),
   USER_MODELS: userModels,
 } as const;
