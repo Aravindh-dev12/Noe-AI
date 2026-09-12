@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { db, ingestHostReceipt } from '@onbae/db';
+import { db, ingestHostReceipt, type Prisma } from '@onbae/db';
 import {
   assertEd25519PublicKey,
   hostReceiptSchema,
@@ -183,7 +183,7 @@ export async function hostRoutes(app: FastifyInstance) {
         displayName: input.displayName,
         version: input.version,
         status: 'ACTIVE',
-        config: input.config,
+        config: input.config as Prisma.InputJsonValue,
       },
     });
 
