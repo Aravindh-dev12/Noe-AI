@@ -27,6 +27,25 @@ describe('MockProvider', () => {
     expect(first.rawText).toBe(second.rawText);
     expect(['stone', 'wave', 'spark']).toContain(parsed.action);
   });
+
+  it('returns a structured example when the selected action supplies one', async () => {
+    const provider = new MockProvider();
+    const result = await provider.run({
+      ...input,
+      allowedActions: [
+        {
+          id: 'offer',
+          example: { kind: 'offer', allocationToA: [2, 2, 2] },
+        },
+      ],
+    });
+
+    expect(JSON.parse(result.rawText) as unknown).toEqual({
+      kind: 'offer',
+      allocationToA: [2, 2, 2],
+    });
+    expect(result.providerMetadata).toMatchObject({ selectedActionId: 'offer' });
+  });
 });
 
 describe('OpenAIProvider', () => {
