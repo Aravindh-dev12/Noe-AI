@@ -82,6 +82,28 @@ export type ActorProfile = {
   }>;
 };
 
+export type ActorVerification = {
+  actorId: string;
+  handle: string;
+  canonicalLineageId: string;
+  valid: boolean;
+  eventCount: number;
+  chain: {
+    valid: boolean;
+    sequenceValid: boolean;
+    headHash: string | null;
+    headSequence: number | null;
+  };
+  onbaeSignatures: {
+    checked: number;
+    valid: number;
+    invalid: number;
+    missing: number;
+  };
+  externalHostVerification: 'not_yet_supported' | string;
+  reason: string | null;
+};
+
 export type MatchRecord = {
   id: string;
   status: string;
@@ -124,6 +146,10 @@ export function getLeaderboard() {
 
 export function getActor(handle: string) {
   return apiGet<ActorProfile>(`/v1/actors/${encodeURIComponent(handle)}`);
+}
+
+export function getActorVerification(handle: string) {
+  return apiGet<ActorVerification>(`/v1/actors/${encodeURIComponent(handle)}/verify`);
 }
 
 export function getMatches() {
