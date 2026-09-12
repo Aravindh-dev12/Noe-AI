@@ -1,6 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { normalizeHandle } from '@onbae/actor-core';
-import { db, verifyAuthorityState, verifyInstitutionalState } from '@onbae/db';
+import {
+  db,
+  verifyAuthorityState,
+  verifyConsequenceState,
+  verifyInstitutionalState,
+} from '@onbae/db';
 import { z } from 'zod';
 
 import { ActorVerificationTooLargeError, verifyActorCareer } from '../lib/actor-verification.js';
@@ -62,6 +67,8 @@ export async function passportRoutes(app: FastifyInstance) {
             evidenceBindings: true,
             debtorCommitments: true,
             authorityGrants: true,
+            authorityExercises: true,
+            consequenceAttributions: true,
             followers: true,
             matchesA: true,
             matchesB: true,
@@ -81,15 +88,19 @@ export async function passportRoutes(app: FastifyInstance) {
         verification,
         institutionalVerification,
         authorityVerification,
+        consequenceVerification,
         commitmentGroups,
         validationGroups,
         authorityGroups,
+        exerciseGroups,
+        attributionGroups,
         oldestOpen,
         nextAuthorityExpiry,
       ] = await Promise.all([
         verifyActorCareer(actor.id),
         verifyInstitutionalState(actor.id),
         verifyAuthorityState(actor.id),
+        verifyConsequenceState(actor.id),
         db.commitment.groupBy({
           by: ['status'],
           where: { debtorActorId: actor.id },
@@ -103,6 +114,16 @@ export async function passportRoutes(app: FastifyInstance) {
         db.authorityGrant.groupBy({
           by: ['status'],
           where: { subjectActorId: actor.id },
+          _count: { _all: true },
+        }),
+        db.authorityExercise.groupBy({
+          by: ['coverageStatus'],
+          where: { actorId: actor.id },
+          _count: { _all: true },
+        }),
+        db.consequenceAttribution.groupBy({
+          by: ['disposition'],
+          where: { actorId: actor.id },
           _count: { _all: true },
         }),
         db.commitment.findFirst({
@@ -134,9 +155,15 @@ export async function passportRoutes(app: FastifyInstance) {
       const authorities = Object.fromEntries(
         authorityGroups.map((group) => [group.status.toLowerCase(), group._count._all]),
       );
+      const exercises = Object.fromEntries(
+        exerciseGroups.map((group) => [group.coverageStatus.toLowerCase(), group._count._all]),
+      );
+      const attributions = Object.fromEntries(
+        attributionGroups.map((group) => [group.disposition.toLowerCase(), group._count._all]),
+      );
 
       return {
-        passportVersion: 'noeone.actor-passport.v4',
+        passportVersion: 'noeone.actor-passport.v5',
         actor: {
           id: actor.id,
           handle: actor.handle,
@@ -168,7 +195,14 @@ export async function passportRoutes(app: FastifyInstance) {
           grantsByStatus: authorities,
           effectiveActiveCount: authorityVerification.effectiveActiveCount,
           nextRecordedExpiry: nextAuthorityExpiry?.expiresAt ?? null,
+          exerciseCount: actor._count.authorityExercises,
+          exercisesByCoverage: exercises,
           verification: authorityVerification,
+        },
+        consequences: {
+          attributionCount: actor._count.consequenceAttributions,
+          attributionsByDisposition: attributions,
+          verification: consequenceVerification,
         },
         career: {
           canonicalEvents: actor._count.events,
