@@ -188,7 +188,7 @@ async function executeMatch(job: Job) {
           status: 'COMPLETED',
           completedAt,
           winnerActorId: state.winnerActorId,
-          result: result as Prisma.InputJsonValue,
+          result,
           trajectory: trajectory as Prisma.InputJsonValue,
           error: null,
         },
