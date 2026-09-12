@@ -59,7 +59,7 @@ export async function passportRoutes(app: FastifyInstance) {
           select: {
             events: true,
             hostReceipts: true,
-            evidenceRefs: true,
+            evidenceBindings: true,
             debtorCommitments: true,
             followers: true,
             matchesA: true,
@@ -76,7 +76,7 @@ export async function passportRoutes(app: FastifyInstance) {
     }
 
     try {
-      const [verification, institutionalVerification, commitmentGroups, evidenceGroups, oldestOpen] =
+      const [verification, institutionalVerification, commitmentGroups, validationGroups, oldestOpen] =
         await Promise.all([
           verifyActorCareer(actor.id),
           verifyInstitutionalState(actor.id),
@@ -85,9 +85,9 @@ export async function passportRoutes(app: FastifyInstance) {
             where: { debtorActorId: actor.id },
             _count: { _all: true },
           }),
-          db.evidenceRef.groupBy({
-            by: ['verificationStatus'],
-            where: { actorId: actor.id },
+          db.evidenceValidation.groupBy({
+            by: ['status'],
+            where: { artifact: { bindings: { some: { actorId: actor.id } } } },
             _count: { _all: true },
           }),
           db.commitment.findFirst({
@@ -104,8 +104,8 @@ export async function passportRoutes(app: FastifyInstance) {
       const commitments = Object.fromEntries(
         commitmentGroups.map((group) => [group.status.toLowerCase(), group._count._all]),
       );
-      const evidence = Object.fromEntries(
-        evidenceGroups.map((group) => [group.verificationStatus.toLowerCase(), group._count._all]),
+      const validations = Object.fromEntries(
+        validationGroups.map((group) => [group.status.toLowerCase(), group._count._all]),
       );
 
       return {
@@ -127,8 +127,10 @@ export async function passportRoutes(app: FastifyInstance) {
           descendantCount: actor._count.parentAncestries,
         },
         institutional: {
-          evidenceCount: actor._count.evidenceRefs,
-          evidenceByVerificationStatus: evidence,
+          evidenceBindingCount: actor._count.evidenceBindings,
+          evidenceArtifactCount: institutionalVerification.evidenceArtifactCount,
+          evidenceValidationCount: institutionalVerification.evidenceValidationCount,
+          evidenceValidationsByStatus: validations,
           commitmentCount: actor._count.debtorCommitments,
           commitmentsByStatus: commitments,
           oldestOpenCommitment: oldestOpen,
