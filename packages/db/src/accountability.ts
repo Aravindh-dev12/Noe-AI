@@ -8,6 +8,7 @@ import type {
 import { canonicalJson } from '@onbae/event-model';
 
 import type { RegistryContext } from './continuity.js';
+import { actorControlStateAt, controlQuarantineReason } from './control-operational.js';
 import { appendCanonicalActorEvent } from './events.js';
 import { db } from './index.js';
 import {
@@ -243,6 +244,18 @@ function sameAuthorityExercise(
   );
 }
 
+function authorityCoverageWithControl(
+  allowedByGrant: boolean,
+  grantReasons: string[],
+  quarantineReason: string | null,
+): { coverageStatus: 'COVERED' | 'NOT_COVERED'; reasons: string[] } {
+  const reasons = quarantineReason ? [...grantReasons, quarantineReason] : grantReasons;
+  return {
+    coverageStatus: allowedByGrant && !quarantineReason ? 'COVERED' : 'NOT_COVERED',
+    reasons,
+  };
+}
+
 export async function recordAuthorityExercise(
   input: RecordAuthorityExerciseInput,
   registry: RegistryContext,
@@ -277,7 +290,12 @@ export async function recordAuthorityExercise(
       ...(money.currency !== null ? { currency: money.currency } : {}),
       at: input.exercisedAt,
     });
-    const coverageStatus = evaluation.allowed ? 'COVERED' : 'NOT_COVERED';
+    const control = await actorControlStateAt(tx, input.actorId, input.exercisedAt);
+    const coverage = authorityCoverageWithControl(
+      evaluation.allowed,
+      evaluation.reasons,
+      controlQuarantineReason(control),
+    );
     const chainDigest = sha256Canonical(authorityChainSnapshot(chain, input.exercisedAt));
     const requestDigest = sha256Canonical(
       requestSnapshot({
@@ -299,11 +317,11 @@ export async function recordAuthorityExercise(
       amountMinor: money.amountMinor,
       currency: money.currency,
       exercisedAt: input.exercisedAt,
-      coverageStatus,
+      coverageStatus: coverage.coverageStatus,
       chainDigest,
       requestDigest,
       evaluatorVersion,
-      reasons: evaluation.reasons,
+      reasons: coverage.reasons,
       metadata,
     } as const;
 
@@ -331,11 +349,11 @@ export async function recordAuthorityExercise(
         amountMinor: money.amountMinor,
         currency: money.currency,
         exercisedAt: input.exercisedAt,
-        coverageStatus,
+        coverageStatus: coverage.coverageStatus,
         chainDigest,
         requestDigest,
         evaluatorVersion,
-        reasons: evaluation.reasons,
+        reasons: coverage.reasons,
         idempotencyKey: input.idempotencyKey,
         metadata,
       },
@@ -624,8 +642,18 @@ export async function verifyAuthorityExercise(exerciseId: string): Promise<{
       ...(exercise.currency !== null ? { currency: exercise.currency } : {}),
       at: exercise.exercisedAt,
     });
-    const expectedCoverage = evaluation.allowed ? 'COVERED' : 'NOT_COVERED';
-    if (exercise.coverageStatus !== expectedCoverage) issues.push('coverage status does not recompute');
+    const control = await actorControlStateAt(tx, exercise.actorId, exercise.exercisedAt);
+    const coverage = authorityCoverageWithControl(
+      evaluation.allowed,
+      evaluation.reasons,
+      controlQuarantineReason(control),
+    );
+    if (exercise.coverageStatus !== coverage.coverageStatus) {
+      issues.push('coverage status does not recompute');
+    }
+    if (canonicalJson(exercise.reasons) !== canonicalJson(coverage.reasons)) {
+      issues.push('coverage reasons do not recompute');
+    }
 
     const expectedChainDigest = sha256Canonical(authorityChainSnapshot(chain, exercise.exercisedAt));
     if (exercise.chainDigest !== expectedChainDigest) issues.push('authority chain digest mismatch');
