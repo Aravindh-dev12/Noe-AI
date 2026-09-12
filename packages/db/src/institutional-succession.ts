@@ -170,6 +170,23 @@ type ActivationBasis = {
   }>;
 };
 
+type AuthorityReissuanceShape = {
+  grantorType: string;
+  grantorRef: string;
+  actions: string[];
+  resources: string[];
+  maxAmountMinor: string | null;
+  currency: string | null;
+  notBefore: Date;
+  expiresAt: Date | null;
+  remainingDelegationDepth: number;
+};
+
+type AuthorityActivationShape = AuthorityReissuanceShape & {
+  status: string;
+  revokedAt: Date | null;
+};
+
 export class InstitutionalSuccessionValidationError extends Error {
   readonly statusCode = 400;
   constructor(message: string) {
@@ -656,37 +673,10 @@ function assertSubset(child: string[], parent: string[], label: string): void {
   }
 }
 
-function assertAuthorityReissuanceNonAmplifying(source: {
-  status: string;
-  grantorType: string;
-  grantorRef: string;
-  actions: string[];
-  resources: string[];
-  maxAmountMinor: string | null;
-  currency: string | null;
-  issuedAt: Date;
-  notBefore: Date | null;
-  expiresAt: Date | null;
-  remainingDelegationDepth: number;
-}, target: {
-  status: string;
-  grantorType: string;
-  grantorRef: string;
-  actions: string[];
-  resources: string[];
-  maxAmountMinor: string | null;
-  currency: string | null;
-  issuedAt: Date;
-  notBefore: Date | null;
-  expiresAt: Date | null;
-  remainingDelegationDepth: number;
-}): void {
-  if (source.status !== 'ACTIVE') {
-    throw new InstitutionalSuccessionConflictError('Source authority grant is not active.');
-  }
-  if (target.status !== 'ACTIVE') {
-    throw new InstitutionalSuccessionConflictError('Reissued authority grant is not active.');
-  }
+function assertAuthorityReissuanceNonAmplifying(
+  source: AuthorityReissuanceShape,
+  target: AuthorityReissuanceShape,
+): void {
   if (source.grantorType !== target.grantorType || source.grantorRef !== target.grantorRef) {
     throw new InstitutionalSuccessionConflictError(
       'Authority reissuance must come from the same recorded grantor.',
@@ -705,13 +695,36 @@ function assertAuthorityReissuanceNonAmplifying(source: {
       throw new InstitutionalSuccessionConflictError('Reissued authority changes capped currency.');
     }
   }
-  const sourceStart = source.notBefore ?? source.issuedAt;
-  const targetStart = target.notBefore ?? target.issuedAt;
-  if (targetStart < sourceStart) {
+  if (target.notBefore < source.notBefore) {
     throw new InstitutionalSuccessionConflictError('Reissued authority starts before source grant.');
   }
   if (source.expiresAt && (!target.expiresAt || target.expiresAt > source.expiresAt)) {
     throw new InstitutionalSuccessionConflictError('Reissued authority outlives source grant.');
+  }
+}
+
+function assertAuthorityValidForActivation(
+  grant: AuthorityActivationShape,
+  effectiveAt: Date,
+  label: 'source' | 'successor',
+): void {
+  if (grant.status !== 'ACTIVE') {
+    throw new InstitutionalSuccessionConflictError(`${label} authority grant is not active.`);
+  }
+  if (effectiveAt < grant.notBefore) {
+    throw new InstitutionalSuccessionConflictError(
+      `${label} authority grant is not yet valid at succession effective time.`,
+    );
+  }
+  if (grant.expiresAt && effectiveAt >= grant.expiresAt) {
+    throw new InstitutionalSuccessionConflictError(
+      `${label} authority grant is expired at succession effective time.`,
+    );
+  }
+  if (grant.revokedAt && effectiveAt >= grant.revokedAt) {
+    throw new InstitutionalSuccessionConflictError(
+      `${label} authority grant is revoked at succession effective time.`,
+    );
   }
 }
 
@@ -772,6 +785,11 @@ export async function addInstitutionalSuccessionItem(input: AddSuccessionItemInp
     }
     if (target.subjectActorId !== agreement.successorActorId) {
       throw new InstitutionalSuccessionConflictError('Requested authority grant does not belong to successor actor.');
+    }
+    if (source.status !== 'ACTIVE' || target.status !== 'ACTIVE') {
+      throw new InstitutionalSuccessionConflictError(
+        'Authority reissuance requires currently active source and successor grants.',
+      );
     }
     assertAuthorityReissuanceNonAmplifying(source, target);
   }
@@ -856,7 +874,11 @@ async function createResultingCommitment(
   effectiveAt: Date,
   registry: RegistryContext,
 ): Promise<string> {
-  const source = await tx.commitment.findUnique({ where: { id: item.sourceCommitmentId! } });
+  const sourceCommitmentId = item.sourceCommitmentId;
+  if (!sourceCommitmentId) {
+    throw new InstitutionalSuccessionConflictError('Commitment succession item has no source commitment.');
+  }
+  const source = await tx.commitment.findUnique({ where: { id: sourceCommitmentId } });
   if (!source) throw new InstitutionalSuccessionConflictError('Source commitment disappeared.');
   if (source.status !== 'OPEN') {
     throw new InstitutionalSuccessionConflictError('Source commitment is no longer OPEN.');
@@ -886,6 +908,11 @@ async function createResultingCommitment(
     }
   }
 
+  if (!sourceEvidenceArtifactId) {
+    throw new InstitutionalSuccessionConflictError(
+      'Resulting commitment requires an evidence artifact bound to its debtor.',
+    );
+  }
   await requireEvidenceBoundToActor(debtorActorId, sourceEvidenceArtifactId, tx);
 
   const id = `cmt_${randomUUID()}`;
@@ -964,10 +991,14 @@ async function validateAuthorityReissuance(
   tx: Prisma.TransactionClient,
   agreement: AgreementRow,
   item: ItemRow,
+  effectiveAt: Date,
 ): Promise<string> {
+  if (!item.sourceAuthorityGrantId || !item.requestedAuthorityGrantId) {
+    throw new InstitutionalSuccessionConflictError('Authority succession item is missing grant references.');
+  }
   const [source, target] = await Promise.all([
-    tx.authorityGrant.findUnique({ where: { id: item.sourceAuthorityGrantId! } }),
-    tx.authorityGrant.findUnique({ where: { id: item.requestedAuthorityGrantId! } }),
+    tx.authorityGrant.findUnique({ where: { id: item.sourceAuthorityGrantId } }),
+    tx.authorityGrant.findUnique({ where: { id: item.requestedAuthorityGrantId } }),
   ]);
   if (!source || !target) {
     throw new InstitutionalSuccessionConflictError('Authority grant referenced by succession is missing.');
@@ -978,6 +1009,8 @@ async function validateAuthorityReissuance(
   if (target.subjectActorId !== agreement.successorActorId) {
     throw new InstitutionalSuccessionConflictError('Reissued authority does not belong to successor actor.');
   }
+  assertAuthorityValidForActivation(source, effectiveAt, 'source');
+  assertAuthorityValidForActivation(target, effectiveAt, 'successor');
   assertAuthorityReissuanceNonAmplifying(source, target);
   return target.id;
 }
@@ -1051,7 +1084,12 @@ export async function activateInstitutionalSuccession(
       let resultingCommitmentId: string | null = null;
       let resultingAuthorityGrantId: string | null = null;
       if (item.itemType === 'AUTHORITY_REISSUANCE') {
-        resultingAuthorityGrantId = await validateAuthorityReissuance(tx, agreement, item);
+        resultingAuthorityGrantId = await validateAuthorityReissuance(
+          tx,
+          agreement,
+          item,
+          effectiveAt,
+        );
       } else {
         resultingCommitmentId = await createResultingCommitment(
           tx,
@@ -1327,12 +1365,12 @@ export async function verifyInstitutionalSuccession(actorId: string) {
         continue;
       }
       if (item.itemType === 'AUTHORITY_REISSUANCE') {
-        if (!item.resultingAuthorityGrantId) {
-          errors.push(`${agreement.id}: authority item ${item.id} missing result grant`);
+        if (!item.resultingAuthorityGrantId || !item.sourceAuthorityGrantId) {
+          errors.push(`${agreement.id}: authority item ${item.id} missing grant linkage`);
           continue;
         }
         const [source, target] = await Promise.all([
-          db.authorityGrant.findUnique({ where: { id: item.sourceAuthorityGrantId! } }),
+          db.authorityGrant.findUnique({ where: { id: item.sourceAuthorityGrantId } }),
           db.authorityGrant.findUnique({ where: { id: item.resultingAuthorityGrantId } }),
         ]);
         if (!source || !target) {
@@ -1345,6 +1383,8 @@ export async function verifyInstitutionalSuccession(actorId: string) {
             if (target.subjectActorId !== agreement.successorActorId) {
               throw new InstitutionalSuccessionConflictError('target subject mismatch');
             }
+            // Historical verification intentionally checks the frozen structural scope relationship,
+            // not today's mutable ACTIVE/REVOKED status. Later revocation must not rewrite history.
             assertAuthorityReissuanceNonAmplifying(source, target);
           } catch (error) {
             errors.push(`${agreement.id}: authority item ${item.id} invalid: ${error instanceof Error ? error.message : 'unknown error'}`);
