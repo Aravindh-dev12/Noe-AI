@@ -86,10 +86,11 @@ export async function verificationRoutes(app: FastifyInstance) {
 
       const storedEvents = await db.actorEvent.findMany({
         where: { actorId: actor.id },
-        orderBy: [{ createdAt: 'asc' }, { observedAt: 'asc' }, { id: 'asc' }],
+        orderBy: { sequence: 'asc' },
         select: {
           id: true,
           actorId: true,
+          sequence: true,
           executionId: true,
           hostId: true,
           type: true,
@@ -106,6 +107,8 @@ export async function verificationRoutes(app: FastifyInstance) {
         },
       });
 
+      const sequenceValid = storedEvents.every((event, index) => event.sequence === index + 1);
+
       let events: ActorEvent[];
       try {
         events = storedEvents.map(toActorEvent);
@@ -116,21 +119,24 @@ export async function verificationRoutes(app: FastifyInstance) {
           handle: actor.handle,
           valid: false,
           eventCount,
-          chain: { valid: false, headHash: null },
+          chain: { valid: false, sequenceValid, headHash: null, headSequence: null },
           onbaeSignatures: { checked: 0, valid: 0, invalid: 0, missing: 0 },
           reason: 'stored_event_schema_invalid',
         };
       }
 
-      let chainValid = true;
+      let hashChainValid = true;
       let reason: string | null = null;
       try {
+        if (!sequenceValid) {
+          throw new Error('Actor event sequence is not contiguous from 1.');
+        }
         if (events[0]?.provenance.previousEventHash) {
           throw new Error('The first stored actor event declares a previous event hash.');
         }
         assertEventChain(events);
       } catch (error) {
-        chainValid = false;
+        hashChainValid = false;
         reason = error instanceof Error ? error.message : 'event_chain_invalid';
       }
 
@@ -156,7 +162,7 @@ export async function verificationRoutes(app: FastifyInstance) {
       }
 
       const signaturesValid = signatureInvalid === 0 && signatureMissing === 0;
-      const valid = chainValid && signaturesValid;
+      const valid = hashChainValid && signaturesValid;
 
       return {
         actorId: actor.id,
@@ -165,8 +171,10 @@ export async function verificationRoutes(app: FastifyInstance) {
         valid,
         eventCount,
         chain: {
-          valid: chainValid,
+          valid: hashChainValid,
+          sequenceValid,
           headHash: events.at(-1)?.hash ?? null,
+          headSequence: storedEvents.at(-1)?.sequence ?? null,
         },
         onbaeSignatures: {
           checked,
