@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 
-import { getActor } from '../../../lib/api';
+import { getActor, getActorVerification } from '../../../lib/api';
 
 type PageProps = {
   params: Promise<{ handle: string }>;
@@ -30,6 +30,11 @@ function describeEvent(type: string, payload: Record<string, unknown>) {
   return type.replaceAll('.', ' ');
 }
 
+function shortHash(value: string | null) {
+  if (!value) return '—';
+  return value.length > 24 ? `${value.slice(0, 15)}…${value.slice(-8)}` : value;
+}
+
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { handle } = await params;
   return {
@@ -40,7 +45,10 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
 export default async function ActorPage({ params }: PageProps) {
   const { handle } = await params;
-  const actor = await getActor(handle);
+  const [actor, verification] = await Promise.all([
+    getActor(handle),
+    getActorVerification(handle),
+  ]);
   const currentExecution = actor.executions.find((execution) => execution.endedAt === null) ?? actor.executions[0];
 
   return (
@@ -52,6 +60,9 @@ export default async function ActorPage({ params }: PageProps) {
           <span className="badge">@{actor.handle}</span>
           <span className="badge live">{actor.status}</span>
           <span className="badge">{actor.actorType}</span>
+          <span className={verification.valid ? 'badge live' : 'badge'}>
+            {verification.valid ? 'verified career' : 'verification failed'}
+          </span>
           <span className="badge">born {formatDate(actor.createdAt)}</span>
         </div>
       </section>
@@ -119,6 +130,35 @@ export default async function ActorPage({ params }: PageProps) {
               <li>
                 <span>Execution since</span>
                 <b>{currentExecution ? formatDate(currentExecution.startedAt) : '—'}</b>
+              </li>
+            </ul>
+          </div>
+
+          <div className="card">
+            <div className="panel-head">
+              <h2>Career integrity</h2>
+              <span className={verification.valid ? 'badge live' : 'badge'}>
+                {verification.valid ? 'verified' : 'invalid'}
+              </span>
+            </div>
+            <ul className="detail-list">
+              <li>
+                <span>Canonical events</span>
+                <b>{verification.eventCount}</b>
+              </li>
+              <li>
+                <span>Sequence</span>
+                <b>{verification.chain.sequenceValid ? 'continuous' : 'broken'}</b>
+              </li>
+              <li>
+                <span>Signed by Onbae</span>
+                <b>{verification.onbaeSignatures.valid}/{verification.onbaeSignatures.checked}</b>
+              </li>
+              <li>
+                <span>Chain head</span>
+                <b className="hash" title={verification.chain.headHash ?? undefined}>
+                  #{verification.chain.headSequence ?? 0} · {shortHash(verification.chain.headHash)}
+                </b>
               </li>
             </ul>
           </div>
