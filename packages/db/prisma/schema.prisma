@@ -211,6 +211,7 @@ model Environment {
 model ActorEvent {
   id                 String          @id
   actorId            String
+  sequence           Int
   executionId        String?
   hostId             String
   type               String
@@ -230,6 +231,7 @@ model ActorEvent {
   execution ActorExecution? @relation(fields: [executionId], references: [id], onDelete: SetNull)
   host      Host            @relation(fields: [hostId], references: [id], onDelete: Restrict)
 
+  @@unique([actorId, sequence])
   @@index([actorId, occurredAt])
   @@index([actorId, canonicalStatus, occurredAt])
   @@index([type, occurredAt])
