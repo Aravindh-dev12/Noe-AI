@@ -50,8 +50,9 @@ describe('canonical JSON', () => {
       '\u0080': 'Control',
       '\u00f6': 'Latin Small Letter O With Diaeresis',
     };
+    const parsed = JSON.parse(canonicalJson(value)) as Record<string, unknown>;
 
-    expect(Object.keys(JSON.parse(canonicalJson(value)))).toEqual([
+    expect(Object.keys(parsed)).toEqual([
       '\r',
       '1',
       '\u0080',

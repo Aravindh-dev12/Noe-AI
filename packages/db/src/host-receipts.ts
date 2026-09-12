@@ -24,7 +24,7 @@ export class HostReceiptIngestError extends Error {
 }
 
 export type IngestHostReceiptInput = {
-  receipt: HostReceipt | unknown;
+  receipt: unknown;
   signature: string;
   registrySigningSecret: string;
 };
@@ -75,15 +75,11 @@ export async function ingestHostReceipt(input: IngestHostReceiptInput) {
       tx.environment.findUnique({ where: { id: receipt.environmentId } }),
     ]);
 
-    if (!host) {
-      throw new HostReceiptIngestError(`Host ${receipt.hostId} does not exist.`, 404);
-    }
+    if (!host) throw new HostReceiptIngestError(`Host ${receipt.hostId} does not exist.`, 404);
     if (host.status !== 'active') {
       throw new HostReceiptIngestError(`Host ${receipt.hostId} is unavailable.`, 403);
     }
-    if (!key) {
-      throw new HostReceiptIngestError(`Host key ${receipt.keyId} does not exist.`, 404);
-    }
+    if (!key) throw new HostReceiptIngestError(`Host key ${receipt.keyId} does not exist.`, 404);
     if (key.hostId !== receipt.hostId || key.status !== 'active') {
       throw new HostReceiptIngestError(
         `Host key ${receipt.keyId} is not active for host ${receipt.hostId}.`,
@@ -93,9 +89,7 @@ export async function ingestHostReceipt(input: IngestHostReceiptInput) {
     if (key.algorithm !== 'ed25519') {
       throw new HostReceiptIngestError(`Unsupported host key algorithm ${key.algorithm}.`, 400);
     }
-    if (!actor) {
-      throw new HostReceiptIngestError(`Actor ${receipt.actorId} does not exist.`, 404);
-    }
+    if (!actor) throw new HostReceiptIngestError(`Actor ${receipt.actorId} does not exist.`, 404);
     if (actor.status !== 'ACTIVE') {
       throw new HostReceiptIngestError(`Actor ${receipt.actorId} is unavailable.`, 409);
     }

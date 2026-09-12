@@ -65,24 +65,16 @@ function compareUtf16(a: string, b: string): number {
   return a < b ? -1 : 1;
 }
 
-/**
- * Canonicalize I-JSON using the RFC 8785/JCS ordering model. JSON.stringify in
- * Node/V8 supplies the ECMAScript primitive serialization required by JCS; this
- * function adds recursive raw UTF-16 property ordering and rejects values that
- * cannot be represented as interoperable JSON.
- */
 function canonicalize(value: unknown, seen: Set<object>): unknown {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') {
     return value;
   }
-
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) {
       throw new TypeError('Canonical JSON does not permit NaN or Infinity.');
     }
     return value;
   }
-
   if (
     typeof value === 'undefined' ||
     typeof value === 'bigint' ||
@@ -91,7 +83,6 @@ function canonicalize(value: unknown, seen: Set<object>): unknown {
   ) {
     throw new TypeError(`Value of type ${typeof value} is not valid canonical JSON.`);
   }
-
   if (Array.isArray(value)) {
     if (seen.has(value)) throw new TypeError('Canonical JSON does not permit cyclic values.');
     seen.add(value);
@@ -99,14 +90,12 @@ function canonicalize(value: unknown, seen: Set<object>): unknown {
     seen.delete(value);
     return result;
   }
-
   if (typeof value === 'object') {
     if (seen.has(value)) throw new TypeError('Canonical JSON does not permit cyclic values.');
-    const prototype = Object.getPrototypeOf(value);
+    const prototype = Reflect.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) {
       throw new TypeError('Canonical JSON only accepts plain JSON objects.');
     }
-
     seen.add(value);
     const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
       compareUtf16(a, b),
@@ -117,7 +106,6 @@ function canonicalize(value: unknown, seen: Set<object>): unknown {
     seen.delete(value);
     return result;
   }
-
   throw new TypeError('Unsupported canonical JSON value.');
 }
 
@@ -128,10 +116,7 @@ export function canonicalJson(value: unknown): string {
 function hashingView(event: UnsignedActorEvent): UnsignedActorEvent {
   const { signature, ...provenance } = event.provenance;
   void signature;
-  return {
-    ...event,
-    provenance,
-  };
+  return { ...event, provenance };
 }
 
 export function hashUnsignedEvent(event: UnsignedActorEvent): string {
@@ -144,10 +129,7 @@ export function hashUnsignedEvent(event: UnsignedActorEvent): string {
 
 export function createActorEvent(input: UnsignedActorEvent): ActorEvent {
   const parsed = unsignedActorEventSchema.parse(input);
-  return actorEventSchema.parse({
-    ...parsed,
-    hash: hashUnsignedEvent(parsed),
-  });
+  return actorEventSchema.parse({ ...parsed, hash: hashUnsignedEvent(parsed) });
 }
 
 export function verifyEventHash(event: ActorEvent): boolean {
@@ -164,7 +146,6 @@ export function verifyEventSignature(hash: string, signature: string, secret: st
   const expected = signEventHash(hash, secret);
   const a = Buffer.from(expected, 'hex');
   const b = Buffer.from(signature, 'hex');
-
   if (a.length !== b.length) return false;
   return timingSafeEqual(a, b);
 }
@@ -188,7 +169,6 @@ export function signHostReceipt(receipt: HostReceipt, privateKeyPem: string): st
   if (key.asymmetricKeyType !== 'ed25519') {
     throw new Error(`Host private key must be Ed25519, received ${key.asymmetricKeyType ?? 'unknown'}.`);
   }
-
   const signature = signDetached(null, Buffer.from(canonicalJson(parsed)), key).toString('base64url');
   return `ed25519:${signature}`;
 }
@@ -201,7 +181,6 @@ export function verifyHostReceiptSignature(
   const parsed = hostReceiptSchema.parse(receipt);
   const parsedSignature = hostReceiptSignatureSchema.safeParse(signature);
   if (!parsedSignature.success) return false;
-
   try {
     const key = createPublicKey(publicKeyPem);
     if (key.asymmetricKeyType !== 'ed25519') return false;
@@ -219,19 +198,14 @@ export function verifyHostReceiptSignature(
 
 export function assertEventChain(events: readonly ActorEvent[]): void {
   let previousHash: string | undefined;
-
   for (const event of events) {
-    if (!verifyEventHash(event)) {
-      throw new Error(`Invalid event hash for ${event.id}.`);
-    }
-
+    if (!verifyEventHash(event)) throw new Error(`Invalid event hash for ${event.id}.`);
     const declaredPrevious = event.provenance.previousEventHash;
     if (previousHash !== undefined && declaredPrevious !== previousHash) {
       throw new Error(
         `Broken event chain at ${event.id}: expected previous hash ${previousHash}, received ${declaredPrevious ?? 'none'}.`,
       );
     }
-
     previousHash = event.hash;
   }
 }
