@@ -77,6 +77,11 @@ const anthropicResponseSchema = z.object({
     .optional(),
 });
 
+const mockActionSchema = z.object({
+  id: z.string(),
+  example: z.unknown().optional(),
+});
+
 function buildUsage(inputTokens?: number, outputTokens?: number): ProviderRunResult['usage'] {
   if (inputTokens === undefined && outputTokens === undefined) {
     return undefined;
@@ -241,7 +246,7 @@ export class MockProvider implements ModelProvider {
   constructor(readonly model = 'deterministic-mock-v1') {}
 
   async run(input: ProviderRunInput): Promise<ProviderRunResult> {
-    const actions = z.array(z.object({ id: z.string() })).parse(input.allowedActions);
+    const actions = z.array(mockActionSchema).parse(input.allowedActions);
     if (actions.length === 0) {
       throw new Error('MockProvider requires at least one allowed action.');
     }
@@ -250,11 +255,12 @@ export class MockProvider implements ModelProvider {
       .update(`${input.actorId}:${input.executionId}:${JSON.stringify(input.observation)}`)
       .digest();
     const selected = actions[digest[0]! % actions.length]!;
+    const actionPayload = selected.example ?? { action: selected.id };
 
     return {
-      rawText: JSON.stringify({ action: selected.id }),
+      rawText: JSON.stringify(actionPayload),
       usage: { inputTokens: 0, outputTokens: 0 },
-      providerMetadata: { deterministic: true },
+      providerMetadata: { deterministic: true, selectedActionId: selected.id },
     };
   }
 }
