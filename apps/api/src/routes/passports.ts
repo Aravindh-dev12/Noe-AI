@@ -2,10 +2,12 @@ import type { FastifyInstance } from 'fastify';
 import { normalizeHandle } from '@onbae/actor-core';
 import {
   db,
+  getActorInstitutionalSuccessionSummary,
   getActorRecognitionSummary,
   verifyAuthorityState,
   verifyConsequenceState,
   verifyInstitutionalState,
+  verifyInstitutionalSuccession,
   verifyRecognitionContinuity,
 } from '@onbae/db';
 import { z } from 'zod';
@@ -93,6 +95,8 @@ export async function passportRoutes(app: FastifyInstance) {
         consequenceVerification,
         recognitionSummary,
         recognitionVerification,
+        successionSummary,
+        successionVerification,
         commitmentGroups,
         validationGroups,
         authorityGroups,
@@ -107,6 +111,8 @@ export async function passportRoutes(app: FastifyInstance) {
         verifyConsequenceState(actor.id),
         getActorRecognitionSummary(actor.id),
         verifyRecognitionContinuity(actor.id),
+        getActorInstitutionalSuccessionSummary(actor.id),
+        verifyInstitutionalSuccession(actor.id),
         db.commitment.groupBy({
           by: ['status'],
           where: { debtorActorId: actor.id },
@@ -169,7 +175,7 @@ export async function passportRoutes(app: FastifyInstance) {
       );
 
       return {
-        passportVersion: 'noeone.actor-passport.v5',
+        passportVersion: 'noeone.actor-passport.v6',
         actor: {
           id: actor.id,
           handle: actor.handle,
@@ -191,6 +197,15 @@ export async function passportRoutes(app: FastifyInstance) {
           asOf: recognitionSummary.asOf,
           contexts: recognitionSummary.contexts,
           verification: recognitionVerification,
+        },
+        succession: {
+          predecessorAgreementCount: successionSummary.predecessorAgreementCount,
+          successorAgreementCount: successionSummary.successorAgreementCount,
+          effectiveAgreementCount: successionSummary.effectiveAgreementCount,
+          commitmentTransfersOut: successionSummary.commitmentTransfersOut,
+          commitmentTransfersIn: successionSummary.commitmentTransfersIn,
+          authorityReissuances: successionSummary.authorityReissuances,
+          verification: successionVerification,
         },
         institutional: {
           evidenceBindingCount: actor._count.evidenceBindings,
