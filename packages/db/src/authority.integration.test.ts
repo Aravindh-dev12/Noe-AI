@@ -76,8 +76,10 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (grantIds.length > 0) {
-    await db.authorityGrant.deleteMany({ where: { id: { in: grantIds.slice().reverse() } } });
+  // Delete descendants before ancestors so the self-referential FK remains
+  // valid on databases that check RESTRICT constraints row-by-row.
+  for (const grantId of grantIds.slice().reverse()) {
+    await db.authorityGrant.deleteMany({ where: { id: grantId } });
   }
   if (actorIds.length > 0) {
     await db.actor.deleteMany({ where: { id: { in: actorIds } } });
@@ -87,11 +89,14 @@ afterAll(async () => {
 });
 
 describe('persistent delegated authority', () => {
-  it('attenuates delegation, survives migration, and cascades revocation logically', async () => {
+  it('attenuates delegation, survives migration, preserves replay, and cascades revocation logically', async () => {
     const rootActor = await createActor('root');
     const delegateActor = await createActor('delegate');
     const now = new Date();
     const expiry = new Date(now.getTime() + 60 * 60 * 1000);
+    const childNotBefore = new Date(now.getTime() + 1_000);
+    const childExpiry = new Date(expiry.getTime() - 1_000);
+    const childIdempotencyKey = `authority-child-${suffix}`;
 
     const root = await createAuthorityGrant(
       {
@@ -112,23 +117,21 @@ describe('persistent delegated authority', () => {
     );
     grantIds.push(root.grant.id);
 
-    const child = await createAuthorityGrant(
-      {
-        subjectActorId: delegateActor.actorId,
-        parentGrantId: root.grant.id,
-        actions: ['purchase'],
-        resources: ['checkout'],
-        canRedelegate: false,
-        remainingDelegationDepth: 0,
-        maxAmountMinor: '2000',
-        currency: 'USD',
-        notBefore: new Date(now.getTime() + 1_000),
-        expiresAt: new Date(expiry.getTime() - 1_000),
-        principal: { type: 'admin' },
-        idempotencyKey: `authority-child-${suffix}`,
-      },
-      registry,
-    );
+    const childInput = {
+      subjectActorId: delegateActor.actorId,
+      parentGrantId: root.grant.id,
+      actions: ['purchase'],
+      resources: ['checkout'],
+      canRedelegate: false,
+      remainingDelegationDepth: 0,
+      maxAmountMinor: '2000',
+      currency: 'USD',
+      notBefore: childNotBefore,
+      expiresAt: childExpiry,
+      principal: { type: 'admin' as const },
+      idempotencyKey: childIdempotencyKey,
+    };
+    const child = await createAuthorityGrant(childInput, registry);
     grantIds.push(child.grant.id);
 
     const allowed = await evaluateActorAuthority(delegateActor.actorId, {
@@ -198,6 +201,13 @@ describe('persistent delegated authority', () => {
 
     const childRow = await db.authorityGrant.findUniqueOrThrow({ where: { id: child.grant.id } });
     expect(childRow.status).toBe('ACTIVE');
+
+    // Historical idempotency must not depend on the parent's later lifecycle.
+    // The same request replays the original child instead of trying to create a
+    // fresh delegation from a now-revoked parent.
+    const replayedChild = await createAuthorityGrant(childInput, registry);
+    expect(replayedChild.replayed).toBe(true);
+    expect(replayedChild.grant.id).toBe(child.grant.id);
 
     const denied = await evaluateActorAuthority(delegateActor.actorId, {
       action: 'purchase',
