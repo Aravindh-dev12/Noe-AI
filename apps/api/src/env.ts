@@ -12,6 +12,7 @@ const rawEnvSchema = z.object({
   CORS_ORIGINS: z.string().default('http://localhost:3000'),
   TRUST_PROXY: z.enum(['true', 'false']).default('false'),
   USER_MODEL_ALLOWLIST: z.string().default('mock:nova-seed-v1,mock:echo-seed-v1'),
+  MAX_USER_ACTORS: z.coerce.number().int().min(1).max(100).default(10),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 
