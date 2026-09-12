@@ -40,7 +40,7 @@ const hostReceipt: HostReceipt = {
 };
 
 describe('canonical JSON', () => {
-  it('sorts raw property names by UTF-16 code units instead of locale collation', () => {
+  it('sorts raw property names by RFC 8785 UTF-16 code-unit order on the wire', () => {
     const value = {
       '\u20ac': 'Euro Sign',
       '\r': 'Carriage Return',
@@ -50,23 +50,33 @@ describe('canonical JSON', () => {
       '\u0080': 'Control',
       '\u00f6': 'Latin Small Letter O With Diaeresis',
     };
-    const parsed = JSON.parse(canonicalJson(value)) as Record<string, unknown>;
 
-    expect(Object.keys(parsed)).toEqual([
-      '\r',
-      '1',
-      '\u0080',
-      '\u00f6',
-      '\u20ac',
-      '\ud83d\ude00',
-      '\ufb33',
-    ]);
+    // This is the ordering vector from RFC 8785 section 3.2.3. We assert
+    // serialized bytes directly: Object.keys(JSON.parse(...)) is invalid for
+    // this test because ECMAScript enumerates integer-index keys such as "1"
+    // ahead of ordinary string keys regardless of their source JSON position.
+    expect(canonicalJson(value)).toBe(
+      '{"\\r":"Carriage Return","1":"One","":"Control","ö":"Latin Small Letter O With Diaeresis","€":"Euro Sign","😀":"Emoji: Grinning Face","דּ":"Hebrew Letter Dalet With Dagesh"}',
+    );
   });
 
-  it('rejects values outside interoperable JSON', () => {
+  it('sorts objects recursively without changing array order', () => {
+    expect(
+      canonicalJson({
+        z: [{ '2': 'two', '\n': 'newline' }, { z: 1, a: 2 }],
+        a: { z: true, a: false },
+      }),
+    ).toBe(
+      '{"a":{"a":false,"z":true},"z":[{"\\n":"newline","2":"two"},{"a":2,"z":1}]}',
+    );
+  });
+
+  it('rejects values outside interoperable canonical JSON', () => {
     expect(() => canonicalJson({ bad: Number.NaN })).toThrow(/NaN or Infinity/);
     expect(() => canonicalJson({ bad: Number.POSITIVE_INFINITY })).toThrow(/NaN or Infinity/);
     expect(() => canonicalJson({ bad: 1n })).toThrow(/not valid canonical JSON/);
+    expect(() => canonicalJson({ bad: '\ud800' })).toThrow(/lone Unicode surrogates/);
+    expect(() => canonicalJson({ '\udc00': 'bad key' })).toThrow(/lone Unicode surrogates/);
   });
 });
 
@@ -78,6 +88,22 @@ describe('canonical events', () => {
     const reordered = createActorEvent({ id: 'evt_1', ...base, payload: { z: 1, a: 2 } });
     const reorderedAgain = createActorEvent({ id: 'evt_1', ...base, payload: { a: 2, z: 1 } });
     expect(reordered.hash).toBe(reorderedAgain.hash);
+  });
+
+  it('does not let integer-like payload keys bypass canonical ordering', () => {
+    const first = createActorEvent({
+      id: 'evt_numeric_keys',
+      ...base,
+      payload: { '1': 'one', '\r': 'carriage-return' },
+    });
+    const second = createActorEvent({
+      id: 'evt_numeric_keys',
+      ...base,
+      payload: { '\r': 'carriage-return', '1': 'one' },
+    });
+
+    expect(first.hash).toBe(second.hash);
+    expect(verifyEventHash(first)).toBe(true);
   });
 
   it('binds the semantic source key into the event hash', () => {
