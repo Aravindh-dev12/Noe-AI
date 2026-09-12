@@ -81,6 +81,18 @@ enum AuthorityGrantStatus {
   REVOKED
 }
 
+enum AuthorityExerciseCoverage {
+  COVERED
+  NOT_COVERED
+}
+
+enum ConsequenceAttributionDisposition {
+  SUPPORTED
+  NOT_SUPPORTED
+  INDETERMINATE
+  DISPUTED
+}
+
 model User {
   id            String   @id
   email         String   @unique
@@ -158,24 +170,26 @@ model Actor {
   createdAt          DateTime
   updatedAt          DateTime    @updatedAt
 
-  owner                 User?                  @relation(fields: [ownerId], references: [id], onDelete: SetNull)
-  executions            ActorExecution[]
-  lineage               LineageNode[]
-  continuityTransitions ContinuityTransition[]
-  parentAncestries      ActorAncestry[]         @relation("ancestry_parent")
-  childAncestry         ActorAncestry?          @relation("ancestry_child")
-  events                ActorEvent[]
-  hostReceipts          HostReceipt[]
-  evidenceBindings      ActorEvidenceBinding[]
-  debtorCommitments     Commitment[]            @relation("commitment_debtor")
-  creditorCommitments   Commitment[]            @relation("commitment_creditor")
-  authorityGrants       AuthorityGrant[]         @relation("authority_subject")
-  followers             Follow[]
-  subjectEdges          RelationshipEdge[]      @relation("relationship_subject")
-  objectEdges           RelationshipEdge[]      @relation("relationship_object")
-  matchesA              Match[]                 @relation("match_actor_a")
-  matchesB              Match[]                 @relation("match_actor_b")
-  winnerMatches         Match[]                 @relation("match_winner")
+  owner                   User?                     @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  executions              ActorExecution[]
+  lineage                 LineageNode[]
+  continuityTransitions   ContinuityTransition[]
+  parentAncestries        ActorAncestry[]            @relation("ancestry_parent")
+  childAncestry           ActorAncestry?             @relation("ancestry_child")
+  events                  ActorEvent[]
+  hostReceipts            HostReceipt[]
+  evidenceBindings        ActorEvidenceBinding[]
+  debtorCommitments       Commitment[]               @relation("commitment_debtor")
+  creditorCommitments     Commitment[]               @relation("commitment_creditor")
+  authorityGrants         AuthorityGrant[]            @relation("authority_subject")
+  authorityExercises      AuthorityExercise[]
+  consequenceAttributions ConsequenceAttribution[]
+  followers               Follow[]
+  subjectEdges            RelationshipEdge[]         @relation("relationship_subject")
+  objectEdges             RelationshipEdge[]         @relation("relationship_object")
+  matchesA                Match[]                    @relation("match_actor_a")
+  matchesB                Match[]                    @relation("match_actor_b")
+  winnerMatches           Match[]                    @relation("match_winner")
 
   @@index([ownerId])
   @@index([actorType, status])
@@ -193,9 +207,10 @@ model ActorExecution {
   endedAt    DateTime?
   metadata   Json      @default("{}")
 
-  actor        Actor         @relation(fields: [actorId], references: [id], onDelete: Cascade)
-  events       ActorEvent[]
-  hostReceipts HostReceipt[]
+  actor              Actor               @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  events             ActorEvent[]
+  hostReceipts       HostReceipt[]
+  authorityExercises AuthorityExercise[]
 
   @@index([actorId, startedAt])
   @@index([provider, model])
@@ -388,11 +403,14 @@ model EvidenceArtifact {
   metadata        Json     @default("{}")
   createdAt       DateTime @default(now())
 
-  bindings              ActorEvidenceBinding[]
-  validations           EvidenceValidation[]
-  sourceCommitments     Commitment[]           @relation("commitment_source_evidence")
-  commitmentTransitions CommitmentTransition[] @relation("commitment_transition_evidence")
-  authorityGrants       AuthorityGrant[]        @relation("authority_evidence")
+  bindings                ActorEvidenceBinding[]
+  validations             EvidenceValidation[]
+  sourceCommitments       Commitment[]            @relation("commitment_source_evidence")
+  commitmentTransitions   CommitmentTransition[]  @relation("commitment_transition_evidence")
+  authorityGrants         AuthorityGrant[]         @relation("authority_evidence")
+  authorityExercises      AuthorityExercise[]      @relation("authority_exercise_evidence")
+  consequenceObservations ConsequenceObservation[] @relation("consequence_source_evidence")
+  consequenceAttributions ConsequenceAttribution[] @relation("consequence_attribution_evidence")
 
   @@unique([issuer, digest])
   @@index([kind, observedAt])
@@ -453,10 +471,11 @@ model Commitment {
   createdAt                DateTime         @default(now())
   updatedAt                DateTime         @updatedAt
 
-  debtor         Actor             @relation("commitment_debtor", fields: [debtorActorId], references: [id], onDelete: Restrict)
-  creditor       Actor?            @relation("commitment_creditor", fields: [creditorActorId], references: [id], onDelete: Restrict)
-  sourceEvidence EvidenceArtifact? @relation("commitment_source_evidence", fields: [sourceEvidenceArtifactId], references: [id], onDelete: Restrict)
+  debtor         Actor                    @relation("commitment_debtor", fields: [debtorActorId], references: [id], onDelete: Restrict)
+  creditor       Actor?                   @relation("commitment_creditor", fields: [creditorActorId], references: [id], onDelete: Restrict)
+  sourceEvidence EvidenceArtifact?        @relation("commitment_source_evidence", fields: [sourceEvidenceArtifactId], references: [id], onDelete: Restrict)
   transitions    CommitmentTransition[]
+  consequences   ConsequenceObservation[]
 
   @@index([debtorActorId, status, dueAt])
   @@index([creditorActorId, status, dueAt])
@@ -513,11 +532,12 @@ model AuthorityGrant {
   createdAt                DateTime             @default(now())
   updatedAt                DateTime             @updatedAt
 
-  subject        Actor              @relation("authority_subject", fields: [subjectActorId], references: [id], onDelete: Restrict)
-  parent         AuthorityGrant?    @relation("authority_parent", fields: [parentGrantId], references: [id], onDelete: Restrict)
-  children       AuthorityGrant[]   @relation("authority_parent")
-  sourceEvidence EvidenceArtifact?  @relation("authority_evidence", fields: [sourceEvidenceArtifactId], references: [id], onDelete: Restrict)
+  subject        Actor                       @relation("authority_subject", fields: [subjectActorId], references: [id], onDelete: Restrict)
+  parent         AuthorityGrant?             @relation("authority_parent", fields: [parentGrantId], references: [id], onDelete: Restrict)
+  children       AuthorityGrant[]            @relation("authority_parent")
+  sourceEvidence EvidenceArtifact?           @relation("authority_evidence", fields: [sourceEvidenceArtifactId], references: [id], onDelete: Restrict)
   transitions    AuthorityGrantTransition[]
+  exercises      AuthorityExercise[]
 
   @@index([subjectActorId, status, expiresAt])
   @@index([parentGrantId])
@@ -541,6 +561,90 @@ model AuthorityGrantTransition {
   grant AuthorityGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
 
   @@index([grantId, occurredAt])
+}
+
+model AuthorityExercise {
+  id                 String                    @id
+  actorId            String
+  executionId        String?
+  grantId            String
+  evidenceArtifactId String
+  action             String
+  resource           String
+  amountMinor        String?
+  currency           String?
+  exercisedAt        DateTime
+  coverageStatus     AuthorityExerciseCoverage
+  chainDigest        String
+  requestDigest      String
+  evaluatorVersion   String
+  reasons            String[]
+  idempotencyKey     String                    @unique
+  metadata           Json                      @default("{}")
+  createdAt          DateTime                  @default(now())
+
+  actor        Actor            @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  execution    ActorExecution?  @relation(fields: [executionId], references: [id], onDelete: SetNull)
+  grant        AuthorityGrant   @relation(fields: [grantId], references: [id], onDelete: Restrict)
+  evidence     EvidenceArtifact @relation("authority_exercise_evidence", fields: [evidenceArtifactId], references: [id], onDelete: Restrict)
+  consequences ConsequenceObservation[]
+
+  @@index([actorId, exercisedAt])
+  @@index([grantId, exercisedAt])
+  @@index([evidenceArtifactId])
+  @@index([executionId])
+}
+
+model ConsequenceObservation {
+  id                        String   @id
+  kind                      String
+  sourceEvidenceArtifactId  String
+  sourceAuthorityExerciseId String?
+  commitmentId              String?
+  occurredAt                DateTime
+  valueMinor                String?
+  currency                  String?
+  externalFramework         String?
+  externalReference         String?
+  idempotencyKey            String   @unique
+  metadata                  Json     @default("{}")
+  createdAt                 DateTime @default(now())
+
+  sourceEvidence         EvidenceArtifact      @relation("consequence_source_evidence", fields: [sourceEvidenceArtifactId], references: [id], onDelete: Restrict)
+  sourceAuthorityExercise AuthorityExercise?    @relation(fields: [sourceAuthorityExerciseId], references: [id], onDelete: Restrict)
+  commitment             Commitment?           @relation(fields: [commitmentId], references: [id], onDelete: Restrict)
+  attributions           ConsequenceAttribution[]
+
+  @@index([kind, occurredAt])
+  @@index([sourceEvidenceArtifactId])
+  @@index([sourceAuthorityExerciseId])
+  @@index([commitmentId])
+}
+
+model ConsequenceAttribution {
+  id                       String                            @id
+  consequenceId            String
+  actorId                  String
+  assessmentType           String
+  disposition              ConsequenceAttributionDisposition
+  method                   String
+  methodVersion            String
+  evaluator                String
+  scoreBps                 Int?
+  sourceEvidenceArtifactId String?
+  basisDigest              String
+  idempotencyKey           String                            @unique
+  metadata                 Json                              @default("{}")
+  createdAt                DateTime                          @default(now())
+
+  consequence    ConsequenceObservation @relation(fields: [consequenceId], references: [id], onDelete: Cascade)
+  actor          Actor                  @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  sourceEvidence EvidenceArtifact?      @relation("consequence_attribution_evidence", fields: [sourceEvidenceArtifactId], references: [id], onDelete: Restrict)
+
+  @@index([actorId, createdAt])
+  @@index([consequenceId, createdAt])
+  @@index([method, methodVersion])
+  @@index([sourceEvidenceArtifactId])
 }
 
 model Follow {
