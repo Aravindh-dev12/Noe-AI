@@ -163,7 +163,10 @@ export async function passportRoutes(app: FastifyInstance) {
       );
 
       return {
-        passportVersion: 'noeone.actor-passport.v5',
+        // Accountability fields are additive in v4; preserve the existing
+        // contract version rather than forcing clients to treat an extension
+        // as a breaking schema change.
+        passportVersion: 'noeone.actor-passport.v4',
         actor: {
           id: actor.id,
           handle: actor.handle,
