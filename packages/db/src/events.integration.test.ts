@@ -61,7 +61,7 @@ afterAll(async () => {
 });
 
 describe('canonical actor persistence', () => {
-  it('deduplicates retries by sourceKey and serializes concurrent appends', async () => {
+  it('deduplicates retries and serializes concurrent appends into one monotonic chain', async () => {
     const sourceKey = `test:${suffix}:origin`;
     const eventInput = {
       actorId,
@@ -82,6 +82,7 @@ describe('canonical actor persistence', () => {
     );
 
     expect(retry.id).toBe(first.id);
+    expect(retry.sequence).toBe(1);
     expect(await db.actorEvent.count({ where: { sourceKey } })).toBe(1);
 
     await expect(
@@ -134,13 +135,41 @@ describe('canonical actor persistence', () => {
 
     const events = await db.actorEvent.findMany({
       where: { actorId },
-      orderBy: [{ createdAt: 'asc' }, { observedAt: 'asc' }, { id: 'asc' }],
+      orderBy: { sequence: 'asc' },
     });
 
     expect(events).toHaveLength(3);
+    expect(events.map((event) => event.sequence)).toEqual([1, 2, 3]);
     expect(events[0]!.previousEventHash).toBeNull();
     expect(events[1]!.previousEventHash).toBe(events[0]!.hash);
     expect(events[2]!.previousEventHash).toBe(events[1]!.hash);
+  });
+
+  it('enforces unique event sequence positions per actor at the database layer', async () => {
+    const existing = await db.actorEvent.findFirstOrThrow({
+      where: { actorId },
+      orderBy: { sequence: 'asc' },
+    });
+
+    await expect(
+      db.actorEvent.create({
+        data: {
+          id: `evt_duplicate_sequence_${suffix}`,
+          actorId,
+          sequence: existing.sequence,
+          executionId,
+          hostId,
+          type: 'test.duplicate-sequence',
+          occurredAt: new Date(),
+          observedAt: new Date(),
+          environmentVersion: 'test@1',
+          payload: {},
+          issuer: 'integration-test',
+          hash: `sha256:${'a'.repeat(64)}`,
+          canonicalStatus: 'ACCEPTED',
+        },
+      }),
+    ).rejects.toThrow();
   });
 
   it('enforces exactly one active execution per actor at the database layer', async () => {

@@ -14,6 +14,7 @@ import { createProvider } from '@onbae/providers';
 import { z } from 'zod';
 
 import { env } from './env.js';
+import { matchFailureState } from './retry-policy.js';
 
 const MATCH_QUEUE = 'onbae-match-runner';
 const TRIAD_SYSTEM_CONTEXT =
@@ -281,14 +282,21 @@ async function executeMatch(job: Job) {
 
     return { matchId, result, committed };
   } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message.slice(0, 4_000) : 'unknown worker error';
+    // BullMQ increments attemptsStarted whenever a job becomes active. attemptsMade is
+    // incremented only after the processor rethrows, so attemptsStarted is the correct
+    // value for deciding whether another configured attempt remains at this point.
+    const failureState = matchFailureState(job.attemptsStarted, job.opts.attempts);
+
     await db.match.updateMany({
       where: {
         id: match.id,
         status: { notIn: ['COMPLETED', 'CANCELLED'] },
       },
       data: {
-        status: 'FAILED',
-        error: error instanceof Error ? error.message.slice(0, 4_000) : 'unknown worker error',
+        status: failureState,
+        error: errorMessage,
       },
     });
     throw error;
@@ -309,8 +317,11 @@ worker.on('failed', (job, error) => {
   console.error(
     JSON.stringify({
       level: 'error',
-      message: 'match failed',
+      message: 'match attempt failed',
       jobId: job?.id ?? null,
+      attemptsMade: job?.attemptsMade ?? null,
+      attemptsStarted: job?.attemptsStarted ?? null,
+      maxAttempts: job?.opts.attempts ?? 1,
       error: error.message,
     }),
   );

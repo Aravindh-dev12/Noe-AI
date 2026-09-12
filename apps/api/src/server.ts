@@ -12,6 +12,7 @@ import { actorRoutes } from './routes/actors.js';
 import { authRoutes } from './routes/auth.js';
 import { matchRoutes } from './routes/matches.js';
 import { publicRoutes } from './routes/public.js';
+import { verificationRoutes } from './routes/verification.js';
 
 const app = Fastify({
   logger: {
@@ -74,6 +75,7 @@ await authRoutes(app);
 await publicRoutes(app);
 await actorRoutes(app);
 await matchRoutes(app);
+await verificationRoutes(app);
 
 async function start() {
   await bootstrapCoreRecords();

@@ -18,8 +18,9 @@ export type AppendCanonicalActorEventInput = {
  * Append one canonical actor event while serializing writes for the actor.
  *
  * The actor row lock ensures concurrent writers cannot both observe the same
- * chain tail. sourceKey provides semantic idempotency for retryable operations
- * such as match completion and execution migration.
+ * chain tail or allocate the same per-actor sequence. sourceKey provides
+ * semantic idempotency for retryable operations such as match completion and
+ * execution migration.
  */
 export async function appendCanonicalActorEvent(
   tx: Prisma.TransactionClient,
@@ -85,9 +86,10 @@ export async function appendCanonicalActorEvent(
 
   const previous = await tx.actorEvent.findFirst({
     where: { actorId: input.actorId },
-    orderBy: [{ createdAt: 'desc' }, { observedAt: 'desc' }, { id: 'desc' }],
-    select: { hash: true },
+    orderBy: { sequence: 'desc' },
+    select: { hash: true, sequence: true },
   });
+  const sequence = (previous?.sequence ?? 0) + 1;
 
   const now = new Date();
   const event = createActorEvent({
@@ -114,6 +116,7 @@ export async function appendCanonicalActorEvent(
     data: {
       id: event.id,
       actorId: event.actorId,
+      sequence,
       ...(event.executionId ? { executionId: event.executionId } : {}),
       hostId: event.hostId,
       type: event.type,
