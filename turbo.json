@@ -1,5 +1,24 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalEnv": [
+    "NODE_ENV",
+    "DATABASE_URL",
+    "REDIS_URL",
+    "ADMIN_API_KEY",
+    "EVENT_SIGNING_SECRET",
+    "CORS_ORIGINS",
+    "TRUST_PROXY",
+    "ONBAE_API_URL",
+    "NEXT_PUBLIC_API_URL",
+    "API_PORT",
+    "WORKER_CONCURRENCY",
+    "MODEL_REQUEST_TIMEOUT_MS",
+    "MAX_MODEL_TOKENS",
+    "OPENAI_API_KEY",
+    "OPENAI_MODEL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_MODEL"
+  ],
   "tasks": {
     "dev": {
       "cache": false,
