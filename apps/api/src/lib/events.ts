@@ -50,7 +50,7 @@ export async function appendCanonicalEvent(
     data: {
       id: event.id,
       actorId: event.actorId,
-      executionId: event.executionId,
+      ...(event.executionId ? { executionId: event.executionId } : {}),
       hostId: event.hostId,
       type: event.type,
       occurredAt: new Date(event.occurredAt),
@@ -59,7 +59,9 @@ export async function appendCanonicalEvent(
       payload: event.payload as Prisma.InputJsonValue,
       issuer: event.provenance.issuer,
       signature,
-      previousEventHash: event.provenance.previousEventHash,
+      ...(event.provenance.previousEventHash
+        ? { previousEventHash: event.provenance.previousEventHash }
+        : {}),
       hash: event.hash,
       canonicalStatus: 'ACCEPTED',
     },
