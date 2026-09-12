@@ -1,8 +1,7 @@
-import { randomUUID } from 'node:crypto';
 import { Worker } from 'bullmq';
 import type { Job } from 'bullmq';
 import { Redis } from 'ioredis';
-import { db, type Prisma } from '@onbae/db';
+import { appendCanonicalActorEvent, db, type Prisma } from '@onbae/db';
 import {
   TRIAD_ENVIRONMENT_VERSION,
   applyTriadRound,
@@ -11,7 +10,6 @@ import {
   triadAllowedActions,
   triadObservation,
 } from '@onbae/environments';
-import { createActorEvent, signEventHash } from '@onbae/event-model';
 import { createProvider } from '@onbae/providers';
 import { z } from 'zod';
 
@@ -29,66 +27,6 @@ function providerApiKey(provider: string): string | undefined {
   if (provider === 'openai') return env.OPENAI_API_KEY;
   if (provider === 'anthropic') return env.ANTHROPIC_API_KEY;
   return undefined;
-}
-
-async function appendCanonicalEvent(
-  tx: Prisma.TransactionClient,
-  input: {
-    actorId: string;
-    executionId: string;
-    type: string;
-    occurredAt: Date;
-    hostId: string;
-    environmentVersion: string;
-    issuer: string;
-    payload: Record<string, unknown>;
-  },
-) {
-  const previous = await tx.actorEvent.findFirst({
-    where: { actorId: input.actorId },
-    orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
-    select: { hash: true },
-  });
-
-  const event = createActorEvent({
-    id: `evt_${randomUUID()}`,
-    actorId: input.actorId,
-    executionId: input.executionId,
-    type: input.type,
-    occurredAt: input.occurredAt.toISOString(),
-    observedAt: new Date().toISOString(),
-    hostId: input.hostId,
-    environmentVersion: input.environmentVersion,
-    payload: input.payload,
-    provenance: {
-      issuer: input.issuer,
-      ...(previous ? { previousEventHash: previous.hash } : {}),
-    },
-    canonicalStatus: 'accepted',
-  });
-
-  const signature = signEventHash(event.hash, env.EVENT_SIGNING_SECRET);
-
-  return tx.actorEvent.create({
-    data: {
-      id: event.id,
-      actorId: event.actorId,
-      executionId: input.executionId,
-      hostId: event.hostId,
-      type: event.type,
-      occurredAt: new Date(event.occurredAt),
-      observedAt: new Date(event.observedAt),
-      environmentVersion: event.environmentVersion,
-      payload: event.payload as Prisma.InputJsonValue,
-      issuer: event.provenance.issuer,
-      signature,
-      ...(event.provenance.previousEventHash
-        ? { previousEventHash: event.provenance.previousEventHash }
-        : {}),
-      hash: event.hash,
-      canonicalStatus: 'ACCEPTED',
-    },
-  });
 }
 
 async function executeMatch(job: Job) {
@@ -150,9 +88,16 @@ async function executeMatch(job: Job) {
     ...(apiKeyB ? { apiKey: apiKeyB } : {}),
   });
 
-  await db.match.update({
-    where: { id: match.id },
-    data: { status: 'RUNNING', startedAt: new Date(), error: null },
+  await db.match.updateMany({
+    where: {
+      id: match.id,
+      status: { notIn: ['COMPLETED', 'CANCELLED'] },
+    },
+    data: {
+      status: 'RUNNING',
+      startedAt: new Date(),
+      error: null,
+    },
   });
 
   let state = createTriadState(match.actorAId, match.actorBId);
@@ -212,7 +157,29 @@ async function executeMatch(job: Job) {
       rounds: state.rounds,
     };
 
-    await db.$transaction(async (tx) => {
+    const committed = await db.$transaction(async (tx) => {
+      const lockedMatches = await tx.$queryRaw<Array<{ status: string }>>`
+        SELECT "status" FROM "Match" WHERE "id" = ${match.id} FOR UPDATE
+      `;
+      const currentStatus = lockedMatches[0]?.status;
+      if (!currentStatus) {
+        throw new Error(`Match ${match.id} disappeared before completion.`);
+      }
+      if (currentStatus === 'COMPLETED' || currentStatus === 'CANCELLED') {
+        return false;
+      }
+
+      const orderedActorIds = [match.actorAId, match.actorBId].sort();
+      const firstActorId = orderedActorIds[0]!;
+      const secondActorId = orderedActorIds[1]!;
+      await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "id"
+        FROM "Actor"
+        WHERE "id" = ${firstActorId} OR "id" = ${secondActorId}
+        ORDER BY "id"
+        FOR UPDATE
+      `;
+
       await tx.match.update({
         where: { id: match.id },
         data: {
@@ -238,37 +205,47 @@ async function executeMatch(job: Job) {
             ? 'win'
             : 'loss';
 
-      await appendCanonicalEvent(tx, {
-        actorId: match.actorAId,
-        executionId: executionA.id,
-        type: 'competition.result',
-        occurredAt: completedAt,
-        hostId: match.environment.hostId,
-        environmentVersion: `${match.environment.slug}@${match.environment.version}`,
-        issuer: match.environment.host.slug,
-        payload: {
-          matchId: match.id,
-          opponentActorId: match.actorBId,
-          result: actorAResult,
-          score: { own: state.scoreA, opponent: state.scoreB },
+      await appendCanonicalActorEvent(
+        tx,
+        {
+          actorId: match.actorAId,
+          executionId: executionA.id,
+          type: 'competition.result',
+          sourceKey: `match:${match.id}:actor:${match.actorAId}:result`,
+          occurredAt: completedAt,
+          hostId: match.environment.hostId,
+          environmentVersion: `${match.environment.slug}@${match.environment.version}`,
+          issuer: match.environment.host.slug,
+          payload: {
+            matchId: match.id,
+            opponentActorId: match.actorBId,
+            result: actorAResult,
+            score: { own: state.scoreA, opponent: state.scoreB },
+          },
         },
-      });
+        env.EVENT_SIGNING_SECRET,
+      );
 
-      await appendCanonicalEvent(tx, {
-        actorId: match.actorBId,
-        executionId: executionB.id,
-        type: 'competition.result',
-        occurredAt: completedAt,
-        hostId: match.environment.hostId,
-        environmentVersion: `${match.environment.slug}@${match.environment.version}`,
-        issuer: match.environment.host.slug,
-        payload: {
-          matchId: match.id,
-          opponentActorId: match.actorAId,
-          result: actorBResult,
-          score: { own: state.scoreB, opponent: state.scoreA },
+      await appendCanonicalActorEvent(
+        tx,
+        {
+          actorId: match.actorBId,
+          executionId: executionB.id,
+          type: 'competition.result',
+          sourceKey: `match:${match.id}:actor:${match.actorBId}:result`,
+          occurredAt: completedAt,
+          hostId: match.environment.hostId,
+          environmentVersion: `${match.environment.slug}@${match.environment.version}`,
+          issuer: match.environment.host.slug,
+          payload: {
+            matchId: match.id,
+            opponentActorId: match.actorAId,
+            result: actorBResult,
+            score: { own: state.scoreB, opponent: state.scoreA },
+          },
         },
-      });
+        env.EVENT_SIGNING_SECRET,
+      );
 
       for (const [subjectActorId, objectActorId] of [
         [match.actorAId, match.actorBId],
@@ -296,12 +273,17 @@ async function executeMatch(job: Job) {
           },
         });
       }
+
+      return true;
     });
 
-    return { matchId, result };
+    return { matchId, result, committed };
   } catch (error) {
-    await db.match.update({
-      where: { id: match.id },
+    await db.match.updateMany({
+      where: {
+        id: match.id,
+        status: { notIn: ['COMPLETED', 'CANCELLED'] },
+      },
       data: {
         status: 'FAILED',
         error: error instanceof Error ? error.message.slice(0, 4_000) : 'unknown worker error',
