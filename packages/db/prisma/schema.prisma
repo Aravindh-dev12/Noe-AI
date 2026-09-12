@@ -28,6 +28,19 @@ enum LineageKind {
   RESTORE
 }
 
+enum ContinuityTransitionKind {
+  MIGRATION
+  RESTORE
+  MERGE
+}
+
+enum ContinuityTransitionStatus {
+  PROPOSED
+  ACCEPTED
+  REJECTED
+  SUPERSEDED
+}
+
 enum CanonicalStatus {
   ACCEPTED
   DISPUTED
@@ -126,17 +139,20 @@ model Actor {
   createdAt          DateTime
   updatedAt          DateTime    @updatedAt
 
-  owner         User?              @relation(fields: [ownerId], references: [id], onDelete: SetNull)
-  executions    ActorExecution[]
-  lineage       LineageNode[]
-  events        ActorEvent[]
-  hostReceipts  HostReceipt[]
-  followers     Follow[]
-  subjectEdges  RelationshipEdge[] @relation("relationship_subject")
-  objectEdges   RelationshipEdge[] @relation("relationship_object")
-  matchesA      Match[]            @relation("match_actor_a")
-  matchesB      Match[]            @relation("match_actor_b")
-  winnerMatches Match[]            @relation("match_winner")
+  owner                  User?                  @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  executions             ActorExecution[]
+  lineage                LineageNode[]
+  continuityTransitions  ContinuityTransition[]
+  parentAncestries       ActorAncestry[]         @relation("ancestry_parent")
+  childAncestry          ActorAncestry?          @relation("ancestry_child")
+  events                 ActorEvent[]
+  hostReceipts           HostReceipt[]
+  followers              Follow[]
+  subjectEdges           RelationshipEdge[]      @relation("relationship_subject")
+  objectEdges            RelationshipEdge[]      @relation("relationship_object")
+  matchesA               Match[]                 @relation("match_actor_a")
+  matchesB               Match[]                 @relation("match_actor_b")
+  winnerMatches          Match[]                 @relation("match_winner")
 
   @@index([ownerId])
   @@index([actorType, status])
@@ -177,6 +193,53 @@ model LineageNode {
 
   @@index([actorId, canonical])
   @@index([parentNodeId])
+}
+
+model ContinuityTransition {
+  id                     String                     @id
+  actorId                String
+  kind                   ContinuityTransitionKind
+  status                 ContinuityTransitionStatus @default(PROPOSED)
+  predecessorLineageId   String
+  predecessorExecutionId String
+  proposedProvider       String
+  proposedModel          String
+  proposedRuntime        String?
+  proposedConfigHash     String
+  resultingExecutionId   String?                    @unique
+  resultingLineageId     String?                    @unique
+  proposedByType         String
+  proposedById           String?
+  policyVersion          String
+  idempotencyKey         String                     @unique
+  reason                 String?
+  changeSet              Json                       @default("{}")
+  proposedAt             DateTime                   @default(now())
+  decidedAt              DateTime?
+  decisionReason         String?
+
+  actor Actor @relation(fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@index([actorId, proposedAt])
+  @@index([actorId, status, proposedAt])
+  @@index([predecessorLineageId])
+}
+
+model ActorAncestry {
+  id                  String   @id
+  childActorId        String   @unique
+  parentActorId       String
+  sourceLineageId     String
+  sourceEventSequence Int?
+  sourceEventHash     String?
+  reason              String?
+  createdAt           DateTime @default(now())
+
+  parentActor Actor @relation("ancestry_parent", fields: [parentActorId], references: [id], onDelete: Restrict)
+  childActor  Actor @relation("ancestry_child", fields: [childActorId], references: [id], onDelete: Cascade)
+
+  @@index([parentActorId, createdAt])
+  @@index([sourceLineageId])
 }
 
 model Host {
