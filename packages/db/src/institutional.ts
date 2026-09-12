@@ -1,12 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import type {
+  ActorEvidenceBinding,
   Commitment,
   CommitmentStatus,
   CommitmentTransition,
-  EvidenceRef,
-  EvidenceVerificationStatus,
+  EvidenceArtifact,
+  EvidenceValidation,
+  EvidenceValidationStatus,
   Prisma,
 } from '@prisma/client';
+import { canonicalJson } from '@onbae/event-model';
 
 import type { RegistryContext } from './continuity.js';
 import { appendCanonicalActorEvent } from './events.js';
@@ -19,14 +22,26 @@ export type InstitutionalPrincipal = {
 
 export type RegisterEvidenceInput = {
   actorId: string;
+  role: string;
   kind: string;
   issuer: string;
   externalId?: string | null;
   uri?: string | null;
   digest: string;
   digestAlgorithm?: string;
-  verificationStatus: EvidenceVerificationStatus;
   observedAt?: Date;
+  artifactMetadata?: Prisma.InputJsonObject;
+  bindingMetadata?: Prisma.InputJsonObject;
+};
+
+export type RecordEvidenceValidationInput = {
+  evidenceArtifactId: string;
+  validator: string;
+  status: EvidenceValidationStatus;
+  method?: string | null;
+  reason?: string | null;
+  idempotencyKey: string;
+  checkedAt?: Date;
   metadata?: Prisma.InputJsonObject;
 };
 
@@ -37,7 +52,7 @@ export type CreateCommitmentInput = {
   kind: string;
   termsDigest: string;
   termsUri?: string | null;
-  sourceEvidenceId?: string | null;
+  sourceEvidenceArtifactId?: string | null;
   externalFramework?: string | null;
   externalReference?: string | null;
   dueAt?: Date | null;
@@ -50,7 +65,7 @@ export type CreateCommitmentInput = {
 export type TransitionCommitmentInput = {
   commitmentId: string;
   toStatus: CommitmentStatus;
-  evidenceRefId?: string | null;
+  evidenceArtifactId?: string | null;
   reason?: string | null;
   principal: InstitutionalPrincipal;
   idempotencyKey: string;
@@ -84,23 +99,38 @@ export function isCommitmentTransitionAllowed(
   return false;
 }
 
-function sameEvidence(existing: EvidenceRef, input: RegisterEvidenceInput): boolean {
+function sameArtifact(existing: EvidenceArtifact, input: RegisterEvidenceInput): boolean {
   return (
-    existing.actorId === input.actorId &&
     existing.kind === input.kind &&
     existing.issuer === input.issuer &&
     existing.externalId === (input.externalId ?? null) &&
     existing.uri === (input.uri ?? null) &&
     existing.digest === input.digest &&
     existing.digestAlgorithm === (input.digestAlgorithm ?? 'sha256') &&
-    existing.verificationStatus === input.verificationStatus
+    canonicalJson(existing.metadata) === canonicalJson(input.artifactMetadata ?? {})
   );
 }
 
+function sameBinding(existing: ActorEvidenceBinding, input: RegisterEvidenceInput): boolean {
+  return (
+    existing.actorId === input.actorId &&
+    existing.role === input.role &&
+    canonicalJson(existing.metadata) === canonicalJson(input.bindingMetadata ?? {})
+  );
+}
+
+/**
+ * Register one immutable evidence artifact and bind it to an actor in a typed role.
+ * The same issuer/digest artifact can be bound to many actors without duplication.
+ */
 export async function registerEvidenceReference(
   input: RegisterEvidenceInput,
   registry: RegistryContext,
-): Promise<{ evidence: EvidenceRef; replayed: boolean }> {
+): Promise<{
+  artifact: EvidenceArtifact;
+  binding: ActorEvidenceBinding;
+  replayed: boolean;
+}> {
   return db.$transaction(async (tx) => {
     const lockedActors = await tx.$queryRaw<Array<{ id: string }>>`
       SELECT "id" FROM "Actor" WHERE "id" = ${input.actorId} FOR UPDATE
@@ -109,39 +139,61 @@ export async function registerEvidenceReference(
       throw Object.assign(new Error('Actor not found.'), { statusCode: 404 });
     }
 
-    const existing = await tx.evidenceRef.findUnique({
+    const observedAt = input.observedAt ?? new Date();
+    const artifact = await tx.evidenceArtifact.upsert({
       where: {
         issuer_digest: {
           issuer: input.issuer,
           digest: input.digest,
         },
       },
-    });
-
-    if (existing) {
-      if (!sameEvidence(existing, input)) {
-        throw new InstitutionalConflictError(
-          'The issuer/digest evidence identity was reused with conflicting data.',
-        );
-      }
-      return { evidence: existing, replayed: true };
-    }
-
-    const observedAt = input.observedAt ?? new Date();
-    const evidence = await tx.evidenceRef.create({
-      data: {
-        id: `evr_${randomUUID()}`,
-        actorId: input.actorId,
+      update: {},
+      create: {
+        id: `eva_${randomUUID()}`,
         kind: input.kind,
         issuer: input.issuer,
         externalId: input.externalId ?? null,
         uri: input.uri ?? null,
         digest: input.digest,
         digestAlgorithm: input.digestAlgorithm ?? 'sha256',
-        verificationStatus: input.verificationStatus,
         observedAt,
-        verifiedAt: input.verificationStatus === 'VERIFIED' ? new Date() : null,
-        metadata: input.metadata ?? {},
+        metadata: input.artifactMetadata ?? {},
+      },
+    });
+
+    if (!sameArtifact(artifact, input)) {
+      throw new InstitutionalConflictError(
+        'The issuer/digest evidence identity was reused with conflicting immutable artifact data.',
+      );
+    }
+
+    const existingBinding = await tx.actorEvidenceBinding.findUnique({
+      where: {
+        actorId_evidenceArtifactId_role: {
+          actorId: input.actorId,
+          evidenceArtifactId: artifact.id,
+          role: input.role,
+        },
+      },
+    });
+
+    if (existingBinding) {
+      if (!sameBinding(existingBinding, input)) {
+        throw new InstitutionalConflictError(
+          'The actor/evidence/role binding was reused with conflicting binding metadata.',
+        );
+      }
+      return { artifact, binding: existingBinding, replayed: true };
+    }
+
+    const binding = await tx.actorEvidenceBinding.create({
+      data: {
+        id: `evb_${randomUUID()}`,
+        actorId: input.actorId,
+        evidenceArtifactId: artifact.id,
+        role: input.role,
+        boundAt: observedAt,
+        metadata: input.bindingMetadata ?? {},
       },
     });
 
@@ -149,26 +201,86 @@ export async function registerEvidenceReference(
       tx,
       {
         actorId: input.actorId,
-        type: 'actor.evidence.attached',
-        sourceKey: `institutional:evidence:${evidence.id}`,
+        type: 'actor.evidence.bound',
+        sourceKey: `institutional:evidence-binding:${binding.id}`,
         occurredAt: observedAt,
         hostId: registry.hostId,
         environmentVersion: registry.environmentVersion,
         issuer: registry.issuer,
         payload: {
-          evidenceId: evidence.id,
-          kind: evidence.kind,
-          issuer: evidence.issuer,
-          externalId: evidence.externalId,
-          digest: evidence.digest,
-          digestAlgorithm: evidence.digestAlgorithm,
-          verificationStatus: evidence.verificationStatus.toLowerCase(),
+          evidenceArtifactId: artifact.id,
+          evidenceBindingId: binding.id,
+          role: binding.role,
+          kind: artifact.kind,
+          issuer: artifact.issuer,
+          externalId: artifact.externalId,
+          digest: artifact.digest,
+          digestAlgorithm: artifact.digestAlgorithm,
         },
       },
       registry.signingSecret,
     );
 
-    return { evidence, replayed: false };
+    return { artifact, binding, replayed: false };
+  });
+}
+
+function sameValidation(
+  existing: EvidenceValidation,
+  input: RecordEvidenceValidationInput,
+): boolean {
+  return (
+    existing.evidenceArtifactId === input.evidenceArtifactId &&
+    existing.validator === input.validator &&
+    existing.status === input.status &&
+    existing.method === (input.method ?? null) &&
+    existing.reason === (input.reason ?? null) &&
+    canonicalJson(existing.metadata) === canonicalJson(input.metadata ?? {})
+  );
+}
+
+/**
+ * Store a validator judgment without collapsing multiple validators into one
+ * global truth value. Validation history is append-only and idempotent.
+ */
+export async function recordEvidenceValidation(
+  input: RecordEvidenceValidationInput,
+): Promise<{ validation: EvidenceValidation; replayed: boolean }> {
+  return db.$transaction(async (tx) => {
+    const existing = await tx.evidenceValidation.findUnique({
+      where: { idempotencyKey: input.idempotencyKey },
+    });
+    if (existing) {
+      if (!sameValidation(existing, input)) {
+        throw new InstitutionalConflictError(
+          `Evidence validation idempotency key ${input.idempotencyKey} was reused with conflicting data.`,
+        );
+      }
+      return { validation: existing, replayed: true };
+    }
+
+    const artifact = await tx.evidenceArtifact.findUnique({
+      where: { id: input.evidenceArtifactId },
+      select: { id: true },
+    });
+    if (!artifact) {
+      throw Object.assign(new Error('Evidence artifact not found.'), { statusCode: 404 });
+    }
+
+    const validation = await tx.evidenceValidation.create({
+      data: {
+        id: `evv_${randomUUID()}`,
+        evidenceArtifactId: input.evidenceArtifactId,
+        validator: input.validator,
+        status: input.status,
+        method: input.method ?? null,
+        reason: input.reason ?? null,
+        checkedAt: input.checkedAt ?? new Date(),
+        idempotencyKey: input.idempotencyKey,
+        metadata: input.metadata ?? {},
+      },
+    });
+    return { validation, replayed: false };
   });
 }
 
@@ -180,7 +292,7 @@ function sameCommitment(existing: Commitment, input: CreateCommitmentInput): boo
     existing.kind === input.kind &&
     existing.termsDigest === input.termsDigest &&
     existing.termsUri === (input.termsUri ?? null) &&
-    existing.sourceEvidenceId === (input.sourceEvidenceId ?? null) &&
+    existing.sourceEvidenceArtifactId === (input.sourceEvidenceArtifactId ?? null) &&
     existing.externalFramework === (input.externalFramework ?? null) &&
     existing.externalReference === (input.externalReference ?? null)
   );
@@ -189,16 +301,17 @@ function sameCommitment(existing: Commitment, input: CreateCommitmentInput): boo
 async function assertEvidenceSupportsActor(
   tx: Prisma.TransactionClient,
   actorId: string,
-  evidenceRefId: string,
-): Promise<EvidenceRef> {
-  const evidence = await tx.evidenceRef.findUnique({ where: { id: evidenceRefId } });
-  if (!evidence) {
-    throw Object.assign(new Error('Evidence reference not found.'), { statusCode: 404 });
+  evidenceArtifactId: string,
+): Promise<void> {
+  const binding = await tx.actorEvidenceBinding.findFirst({
+    where: { actorId, evidenceArtifactId },
+    select: { id: true },
+  });
+  if (!binding) {
+    throw new InstitutionalConflictError(
+      `Evidence artifact ${evidenceArtifactId} is not bound to actor ${actorId}.`,
+    );
   }
-  if (evidence.actorId !== actorId) {
-    throw new InstitutionalConflictError('Evidence reference belongs to a different actor.');
-  }
-  return evidence;
 }
 
 export async function createCommitment(
@@ -247,8 +360,8 @@ export async function createCommitment(
       }
     }
 
-    if (input.sourceEvidenceId) {
-      await assertEvidenceSupportsActor(tx, input.debtorActorId, input.sourceEvidenceId);
+    if (input.sourceEvidenceArtifactId) {
+      await assertEvidenceSupportsActor(tx, input.debtorActorId, input.sourceEvidenceArtifactId);
     }
 
     const now = input.now ?? new Date();
@@ -262,7 +375,7 @@ export async function createCommitment(
         status: 'OPEN',
         termsDigest: input.termsDigest,
         termsUri: input.termsUri ?? null,
-        sourceEvidenceId: input.sourceEvidenceId ?? null,
+        sourceEvidenceArtifactId: input.sourceEvidenceArtifactId ?? null,
         externalFramework: input.externalFramework ?? null,
         externalReference: input.externalReference ?? null,
         dueAt: input.dueAt ?? null,
@@ -280,7 +393,7 @@ export async function createCommitment(
         commitmentId: commitment.id,
         fromStatus: null,
         toStatus: 'OPEN',
-        evidenceRefId: input.sourceEvidenceId ?? null,
+        evidenceArtifactId: input.sourceEvidenceArtifactId ?? null,
         reason: 'commitment opened',
         decidedByType: input.principal.type,
         decidedById: input.principal.id ?? null,
@@ -306,7 +419,7 @@ export async function createCommitment(
           creditorActorId: commitment.creditorActorId,
           creditorExternalRef: commitment.creditorExternalRef,
           termsDigest: commitment.termsDigest,
-          sourceEvidenceId: commitment.sourceEvidenceId,
+          sourceEvidenceArtifactId: commitment.sourceEvidenceArtifactId,
           externalFramework: commitment.externalFramework,
           externalReference: commitment.externalReference,
           dueAt: commitment.dueAt?.toISOString() ?? null,
@@ -348,7 +461,7 @@ export async function transitionCommitment(
       if (
         existingTransition.commitmentId !== commitment.id ||
         existingTransition.toStatus !== input.toStatus ||
-        existingTransition.evidenceRefId !== (input.evidenceRefId ?? null)
+        existingTransition.evidenceArtifactId !== (input.evidenceArtifactId ?? null)
       ) {
         throw new InstitutionalConflictError(
           `Commitment transition idempotency key ${input.idempotencyKey} was reused with conflicting data.`,
@@ -363,8 +476,8 @@ export async function transitionCommitment(
       );
     }
 
-    if (input.evidenceRefId) {
-      await assertEvidenceSupportsActor(tx, commitment.debtorActorId, input.evidenceRefId);
+    if (input.evidenceArtifactId) {
+      await assertEvidenceSupportsActor(tx, commitment.debtorActorId, input.evidenceArtifactId);
     }
 
     const now = input.now ?? new Date();
@@ -383,7 +496,7 @@ export async function transitionCommitment(
         commitmentId: commitment.id,
         fromStatus: commitment.status,
         toStatus: input.toStatus,
-        evidenceRefId: input.evidenceRefId ?? null,
+        evidenceArtifactId: input.evidenceArtifactId ?? null,
         reason: input.reason ?? null,
         decidedByType: input.principal.type,
         decidedById: input.principal.id ?? null,
@@ -408,7 +521,7 @@ export async function transitionCommitment(
           transitionId: transition.id,
           fromStatus: commitment.status.toLowerCase(),
           toStatus: input.toStatus.toLowerCase(),
-          evidenceRefId: input.evidenceRefId ?? null,
+          evidenceArtifactId: input.evidenceArtifactId ?? null,
           reason: input.reason ?? null,
         },
       },
@@ -423,24 +536,42 @@ export type InstitutionalVerification = {
   version: 'noeone.institutional-verification.v1';
   actorId: string;
   valid: boolean;
-  evidenceCount: number;
+  evidenceArtifactCount: number;
+  evidenceValidationCount: number;
   commitmentCount: number;
   transitionCount: number;
   errors: string[];
 };
 
 export async function verifyInstitutionalState(actorId: string): Promise<InstitutionalVerification> {
-  const [actor, evidenceCount, commitments] = await Promise.all([
+  const [actor, evidenceArtifactCount, evidenceValidationCount, commitments] = await Promise.all([
     db.actor.findUnique({ where: { id: actorId }, select: { id: true } }),
-    db.evidenceRef.count({ where: { actorId } }),
+    db.evidenceArtifact.count({
+      where: { bindings: { some: { actorId } } },
+    }),
+    db.evidenceValidation.count({
+      where: { artifact: { bindings: { some: { actorId } } } },
+    }),
     db.commitment.findMany({
       where: { debtorActorId: actorId },
       orderBy: [{ openedAt: 'asc' }, { id: 'asc' }],
       include: {
-        sourceEvidence: { select: { actorId: true } },
+        sourceEvidence: {
+          select: {
+            id: true,
+            bindings: { where: { actorId }, select: { id: true } },
+          },
+        },
         transitions: {
           orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
-          include: { evidenceRef: { select: { actorId: true } } },
+          include: {
+            evidence: {
+              select: {
+                id: true,
+                bindings: { where: { actorId }, select: { id: true } },
+              },
+            },
+          },
         },
       },
     }),
@@ -454,8 +585,8 @@ export async function verifyInstitutionalState(actorId: string): Promise<Institu
   let transitionCount = 0;
 
   for (const commitment of commitments) {
-    if (commitment.sourceEvidence && commitment.sourceEvidence.actorId !== actorId) {
-      errors.push(`${commitment.id}: source evidence belongs to another actor`);
+    if (commitment.sourceEvidence && commitment.sourceEvidence.bindings.length === 0) {
+      errors.push(`${commitment.id}: source evidence is not bound to the debtor actor`);
     }
 
     const transitions = commitment.transitions;
@@ -472,8 +603,8 @@ export async function verifyInstitutionalState(actorId: string): Promise<Institu
 
     let projected: CommitmentStatus = 'OPEN';
     for (const transition of transitions.slice(1)) {
-      if (transition.evidenceRef && transition.evidenceRef.actorId !== actorId) {
-        errors.push(`${commitment.id}: transition evidence belongs to another actor`);
+      if (transition.evidence && transition.evidence.bindings.length === 0) {
+        errors.push(`${commitment.id}: transition evidence is not bound to the debtor actor`);
       }
       if (transition.fromStatus !== projected) {
         errors.push(
@@ -483,9 +614,7 @@ export async function verifyInstitutionalState(actorId: string): Promise<Institu
         continue;
       }
       if (!isCommitmentTransitionAllowed(projected, transition.toStatus)) {
-        errors.push(
-          `${commitment.id}: illegal transition ${projected} -> ${transition.toStatus}`,
-        );
+        errors.push(`${commitment.id}: illegal transition ${projected} -> ${transition.toStatus}`);
       }
       projected = transition.toStatus;
     }
@@ -506,7 +635,8 @@ export async function verifyInstitutionalState(actorId: string): Promise<Institu
     version: 'noeone.institutional-verification.v1',
     actorId,
     valid: errors.length === 0,
-    evidenceCount,
+    evidenceArtifactCount,
+    evidenceValidationCount,
     commitmentCount: commitments.length,
     transitionCount,
     errors,
