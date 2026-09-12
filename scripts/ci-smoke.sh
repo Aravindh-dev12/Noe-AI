@@ -215,6 +215,11 @@ poll_match "$match_id"
 alpha_after_match=$(curl --fail --silent --show-error --max-time 5 "$api/v1/actors/smoke-alpha")
 python3 -c 'import json,sys; d=json.load(sys.stdin); assert any(e["type"] == "competition.result" for e in d["events"])' <<<"$alpha_after_match"
 
+# Onbae must be able to independently verify the stored career chain and every
+# first-party signature after creation, migration, and competition events.
+verification_json=$(curl --fail --silent --show-error --max-time 10 "$api/v1/actors/smoke-alpha/verify")
+ALPHA_ID="$alpha_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["actorId"] == os.environ["ALPHA_ID"]; assert d["valid"] is True; assert d["chain"]["valid"] is True; assert d["eventCount"] >= 3; assert d["onbaeSignatures"]["checked"] == d["onbaeSignatures"]["valid"]; assert d["onbaeSignatures"]["invalid"] == 0; assert d["onbaeSignatures"]["missing"] == 0' <<<"$verification_json"
+
 # Production web server must boot and serve the main product surfaces.
 NODE_ENV=production pnpm --filter @onbae/web start >"$web_log" 2>&1 &
 web_pid=$!
@@ -228,4 +233,4 @@ if grep -q "Rate limiting could not determine a client IP" "$api_log"; then
   exit 1
 fi
 
-echo "Onbae frozen install, authentication, ownership isolation, model migration, match execution, canonical event history, and production web smoke tests passed."
+echo "Onbae frozen install, authentication, ownership isolation, model migration, match execution, canonical actor verification, and production web smoke tests passed."
