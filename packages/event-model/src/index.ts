@@ -13,6 +13,7 @@ export const unsignedActorEventSchema = z.object({
   id: z.string().min(1),
   actorId: z.string().min(1),
   type: z.string().regex(/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/),
+  sourceKey: z.string().min(1).max(240).optional(),
   occurredAt: z.string().datetime(),
   observedAt: z.string().datetime(),
   hostId: z.string().min(1),
