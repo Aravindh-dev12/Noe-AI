@@ -17,4 +17,5 @@ export * from './host-receipts.js';
 export * from './continuity.js';
 export * from './institutional.js';
 export * from './authority.js';
+export * from './temporal-authority.js';
 export * from '@prisma/client';
