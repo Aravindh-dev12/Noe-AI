@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
-import { createActorEvent, signEventHash } from '@onbae/event-model';
+import { canonicalJson, createActorEvent, signEventHash } from '@onbae/event-model';
 
 export type AppendCanonicalActorEventInput = {
   actorId: string;
@@ -43,9 +43,19 @@ export async function appendCanonicalActorEvent(
     });
 
     if (existing) {
-      if (existing.actorId !== input.actorId || existing.type !== input.type) {
+      const expectedExecutionId = input.executionId ?? null;
+      const sameEvent =
+        existing.actorId === input.actorId &&
+        existing.executionId === expectedExecutionId &&
+        existing.type === input.type &&
+        existing.hostId === input.hostId &&
+        existing.environmentVersion === input.environmentVersion &&
+        existing.issuer === input.issuer &&
+        canonicalJson(existing.payload) === canonicalJson(input.payload);
+
+      if (!sameEvent) {
         throw new Error(
-          `Event source key ${input.sourceKey} is already bound to another canonical event.`,
+          `Event source key ${input.sourceKey} was reused with conflicting canonical data.`,
         );
       }
       return existing;
