@@ -60,12 +60,9 @@ const stateQuerySchema = z.object({
   executionId: z.string().min(1).optional(),
   at: z.coerce.date().optional(),
 });
-
 const summaryQuerySchema = z.object({ at: z.coerce.date().optional() });
 
 export async function capabilityContinuityRoutes(app: FastifyInstance) {
-  // Writes are privileged because these records are institutional evidence,
-  // not claims an untrusted agent may self-assert as authoritative.
   app.post('/v1/capability/manifests', async (request, reply) => {
     assertAdmin(request);
     const input = manifestSchema.parse(request.body);
@@ -120,27 +117,22 @@ export async function capabilityContinuityRoutes(app: FastifyInstance) {
     const params = z.object({ grantId: z.string().min(1) }).parse(request.params);
     const query = stateQuerySchema.parse(request.query);
     let executionId = query.executionId;
+
     if (!executionId) {
       const grant = await db.authorityGrant.findUnique({
         where: { id: params.grantId },
         select: { subjectActorId: true },
       });
       if (!grant) return reply.code(404).send({ error: 'authority_grant_not_found' });
-      const current = await db.actorExecution.findFirst({
-        where: { subject: undefined },
-      }).catch(() => null);
-      // Prisma cannot express the raw-table capability records, but the actor
-      // execution itself is modeled. Resolve current execution explicitly.
-      void current;
-      const executions = await db.actorExecution.findMany({
+      const execution = await db.actorExecution.findFirst({
         where: { actorId: grant.subjectActorId, endedAt: null },
         orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
-        take: 1,
         select: { id: true },
       });
-      executionId = executions[0]?.id;
+      executionId = execution?.id;
       if (!executionId) return reply.code(409).send({ error: 'actor_has_no_current_execution' });
     }
+
     return getAuthorityAdmissibilityState(params.grantId, executionId, query.at ?? new Date());
   });
 
