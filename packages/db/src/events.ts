@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { Prisma } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { canonicalJson, createActorEvent, signEventHash } from '@onbae/event-model';
 
 export type AppendCanonicalActorEventInput = {
