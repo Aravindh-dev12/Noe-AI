@@ -23,4 +23,5 @@ export * from './dependency-exposure.js';
 export * from './dependency-impact.js';
 export * from './control-continuity.js';
 export * from './control-operational.js';
+export * from './capability-continuity.js';
 export * from '@prisma/client';
