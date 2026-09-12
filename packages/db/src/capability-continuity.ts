@@ -11,7 +11,6 @@ export type AuthorityAdmissibilityDisposition =
   | 'SUSPENDED'
   | 'NOT_APPLICABLE'
   | 'DISPUTED';
-
 export type CapabilityContinuityState = 'EVIDENCE_MISSING' | 'REVIEW_REQUIRED' | 'ASSESSED';
 
 export type ExecutionCapabilityManifestInput = {
@@ -89,9 +88,29 @@ export type AuthorityAdmissibilityAssessmentRow = {
   createdAt: Date;
 };
 
+type ExecutionContext = {
+  id: string;
+  actorId: string;
+  provider: string;
+  model: string;
+  runtime: string | null;
+  configHash: string;
+  startedAt: Date;
+  endedAt: Date | null;
+};
+
+type GrantContext = {
+  id: string;
+  subjectActorId: string;
+  status: string;
+  actions: string[];
+  resources: string[];
+  notBefore: Date;
+  expiresAt: Date | null;
+};
+
 export class CapabilityContinuityConflictError extends Error {
   readonly statusCode = 409;
-
   constructor(message: string) {
     super(message);
     this.name = 'CapabilityContinuityConflictError';
@@ -100,7 +119,6 @@ export class CapabilityContinuityConflictError extends Error {
 
 export class CapabilityContinuityValidationError extends Error {
   readonly statusCode = 400;
-
   constructor(message: string) {
     super(message);
     this.name = 'CapabilityContinuityValidationError';
@@ -119,256 +137,202 @@ function stableValue(value: unknown): unknown {
   }
   return value;
 }
-
-function stableJson(value: unknown): string {
-  return JSON.stringify(stableValue(value));
-}
-
 function sha256(value: unknown): string {
-  return `sha256:${createHash('sha256').update(stableJson(value)).digest('hex')}`;
+  return `sha256:${createHash('sha256').update(JSON.stringify(stableValue(value))).digest('hex')}`;
 }
-
 function json(value: unknown): Prisma.Sql {
   return Prisma.sql`CAST(${JSON.stringify(value)} AS jsonb)`;
 }
-
 function textArray(values: string[]): Prisma.Sql {
   return values.length === 0
     ? Prisma.sql`ARRAY[]::TEXT[]`
     : Prisma.sql`ARRAY[${Prisma.join(values)}]::TEXT[]`;
 }
-
-function normalizeLabelSet(values: string[] | undefined, field: string): string[] {
-  const normalized = [...new Set((values ?? []).map((value) => value.trim()).filter(Boolean))].sort();
-  if (normalized.some((value) => value.length > 240)) {
-    throw new CapabilityContinuityValidationError(`${field} values must be at most 240 characters.`);
+function required(value: string, field: string, max = 240): string {
+  const result = value.trim();
+  if (!result) throw new CapabilityContinuityValidationError(`${field} is required.`);
+  if (result.length > max) throw new CapabilityContinuityValidationError(`${field} is too long.`);
+  return result;
+}
+function optional(value: string | null | undefined, max = 1_000): string | null {
+  const result = value?.trim() ?? '';
+  if (!result) return null;
+  if (result.length > max) throw new CapabilityContinuityValidationError('Optional text is too long.');
+  return result;
+}
+function labelSet(values: string[] | undefined, field: string): string[] {
+  const result = [...new Set((values ?? []).map((value) => value.trim()).filter(Boolean))].sort();
+  if (result.length > 512 || result.some((value) => value.length > 240)) {
+    throw new CapabilityContinuityValidationError(`${field} exceeds supported bounds.`);
   }
-  if (normalized.length > 512) {
-    throw new CapabilityContinuityValidationError(`${field} cannot contain more than 512 values.`);
+  return result;
+}
+function reasons(values: string[] | undefined): string[] {
+  const result = [...new Set((values ?? []).map((value) => value.trim()).filter(Boolean))];
+  if (result.length > 32 || result.some((value) => value.length > 1_000)) {
+    throw new CapabilityContinuityValidationError('reasons exceeds supported bounds.');
   }
-  return normalized;
+  return result;
 }
 
-function normalizeRequired(value: string, field: string, max = 240): string {
-  const normalized = value.trim();
-  if (!normalized) throw new CapabilityContinuityValidationError(`${field} is required.`);
-  if (normalized.length > max) {
-    throw new CapabilityContinuityValidationError(`${field} must be at most ${max} characters.`);
-  }
-  return normalized;
-}
-
-function normalizeOptional(value: string | null | undefined, max = 500): string | null {
-  const normalized = value?.trim() ?? '';
-  if (!normalized) return null;
-  if (normalized.length > max) {
-    throw new CapabilityContinuityValidationError(`Optional text must be at most ${max} characters.`);
-  }
-  return normalized;
-}
-
-function normalizeReasons(values: string[] | undefined): string[] {
-  const normalized = [...new Set((values ?? []).map((value) => value.trim()).filter(Boolean))];
-  if (normalized.length > 32) {
-    throw new CapabilityContinuityValidationError('reasons cannot contain more than 32 values.');
-  }
-  if (normalized.some((value) => value.length > 1_000)) {
-    throw new CapabilityContinuityValidationError('reason values must be at most 1000 characters.');
-  }
-  return normalized;
-}
-
-async function executionContext(executionId: string) {
-  const rows = await db.$queryRaw<
-    Array<{
-      id: string;
-      actorId: string;
-      provider: string;
-      model: string;
-      runtime: string | null;
-      configHash: string;
-      startedAt: Date;
-      endedAt: Date | null;
-    }>
-  >(Prisma.sql`
+async function getExecution(id: string): Promise<ExecutionContext> {
+  const rows = await db.$queryRaw<ExecutionContext[]>(Prisma.sql`
     SELECT "id", "actorId", "provider", "model", "runtime", "configHash", "startedAt", "endedAt"
-    FROM "ActorExecution"
-    WHERE "id" = ${executionId}
-    LIMIT 1
+    FROM "ActorExecution" WHERE "id" = ${id} LIMIT 1
   `);
-  const execution = rows[0];
-  if (!execution) {
-    throw Object.assign(new Error('Actor execution not found.'), { statusCode: 404 });
-  }
-  return execution;
+  if (!rows[0]) throw Object.assign(new Error('Actor execution not found.'), { statusCode: 404 });
+  return rows[0];
 }
-
-async function grantContext(grantId: string) {
-  const rows = await db.$queryRaw<
-    Array<{
-      id: string;
-      subjectActorId: string;
-      status: string;
-      actions: string[];
-      resources: string[];
-      notBefore: Date;
-      expiresAt: Date | null;
-      updatedAt: Date;
-    }>
-  >(Prisma.sql`
-    SELECT "id", "subjectActorId", "status", "actions", "resources", "notBefore", "expiresAt", "updatedAt"
-    FROM "AuthorityGrant"
-    WHERE "id" = ${grantId}
-    LIMIT 1
+async function getGrant(id: string): Promise<GrantContext> {
+  const rows = await db.$queryRaw<GrantContext[]>(Prisma.sql`
+    SELECT "id", "subjectActorId", "status", "actions", "resources", "notBefore", "expiresAt"
+    FROM "AuthorityGrant" WHERE "id" = ${id} LIMIT 1
   `);
-  const grant = rows[0];
-  if (!grant) throw Object.assign(new Error('Authority grant not found.'), { statusCode: 404 });
-  return grant;
+  if (!rows[0]) throw Object.assign(new Error('Authority grant not found.'), { statusCode: 404 });
+  return rows[0];
 }
-
-async function findManifestById(id: string) {
+async function getManifest(id: string) {
   const rows = await db.$queryRaw<ExecutionCapabilityManifestRow[]>(Prisma.sql`
     SELECT * FROM "ExecutionCapabilityManifest" WHERE "id" = ${id} LIMIT 1
   `);
   return rows[0] ?? null;
 }
-
-async function findManifestByIdempotency(key: string) {
+async function manifestByKey(key: string) {
   const rows = await db.$queryRaw<ExecutionCapabilityManifestRow[]>(Prisma.sql`
     SELECT * FROM "ExecutionCapabilityManifest" WHERE "idempotencyKey" = ${key} LIMIT 1
   `);
   return rows[0] ?? null;
 }
-
-async function findAssessmentByIdempotency(key: string) {
+async function assessmentByKey(key: string) {
   const rows = await db.$queryRaw<AuthorityAdmissibilityAssessmentRow[]>(Prisma.sql`
     SELECT * FROM "AuthorityAdmissibilityAssessment" WHERE "idempotencyKey" = ${key} LIMIT 1
   `);
   return rows[0] ?? null;
 }
+async function requireEvidence(id: string | null | undefined) {
+  if (!id) return;
+  const evidence = await db.evidenceArtifact.findUnique({ where: { id }, select: { id: true } });
+  if (!evidence) throw Object.assign(new Error('Evidence artifact not found.'), { statusCode: 404 });
+}
+
+function manifestBasis(row: {
+  actorId: string;
+  executionId: string;
+  framework: string;
+  frameworkVersion: string | null;
+  issuer: string;
+  externalReference: string | null;
+  sourceEvidenceArtifactId: string | null;
+  capabilities: string[];
+  tools: string[];
+  modelRef: string | null;
+  runtimeRef: string | null;
+  effectiveAt: Date;
+  expiresAt: Date | null;
+}) {
+  return {
+    version: 'noeone.execution-capability-manifest.v1',
+    actorId: row.actorId,
+    executionId: row.executionId,
+    framework: row.framework,
+    frameworkVersion: row.frameworkVersion,
+    issuer: row.issuer,
+    externalReference: row.externalReference,
+    sourceEvidenceArtifactId: row.sourceEvidenceArtifactId,
+    capabilities: [...row.capabilities].sort(),
+    tools: [...row.tools].sort(),
+    modelRef: row.modelRef,
+    runtimeRef: row.runtimeRef,
+    effectiveAt: row.effectiveAt.toISOString(),
+    expiresAt: row.expiresAt?.toISOString() ?? null,
+  };
+}
 
 export async function registerExecutionCapabilityManifest(input: ExecutionCapabilityManifestInput) {
-  const execution = await executionContext(input.executionId);
+  const execution = await getExecution(input.executionId);
   if (execution.actorId !== input.actorId) {
-    throw new CapabilityContinuityConflictError('Execution does not belong to the requested actor.');
+    throw new CapabilityContinuityConflictError('Execution does not belong to actor.');
   }
+  await requireEvidence(input.sourceEvidenceArtifactId);
 
-  const framework = normalizeRequired(input.framework, 'framework', 120).toLowerCase();
-  const frameworkVersion = normalizeOptional(input.frameworkVersion, 120);
-  const issuer = normalizeRequired(input.issuer, 'issuer', 500);
-  const externalReference = normalizeOptional(input.externalReference, 1_000);
-  const modelRef = normalizeOptional(input.modelRef, 500);
-  const runtimeRef = normalizeOptional(input.runtimeRef, 500);
-  const capabilities = normalizeLabelSet(input.capabilities, 'capabilities');
-  const tools = normalizeLabelSet(input.tools, 'tools');
   const effectiveAt = input.effectiveAt ?? new Date();
   const expiresAt = input.expiresAt ?? null;
-
-  if (expiresAt && expiresAt.getTime() <= effectiveAt.getTime()) {
+  if (expiresAt && expiresAt <= effectiveAt) {
     throw new CapabilityContinuityValidationError('expiresAt must be later than effectiveAt.');
   }
-  if (effectiveAt.getTime() < execution.startedAt.getTime()) {
-    throw new CapabilityContinuityConflictError('Capability manifest cannot predate its execution.');
-  }
-  if (execution.endedAt && effectiveAt.getTime() >= execution.endedAt.getTime()) {
-    throw new CapabilityContinuityConflictError('Capability manifest cannot start after execution ended.');
+  if (effectiveAt < execution.startedAt || (execution.endedAt && effectiveAt >= execution.endedAt)) {
+    throw new CapabilityContinuityConflictError('Manifest effective time is outside execution lifetime.');
   }
 
-  if (input.sourceEvidenceArtifactId) {
-    const evidence = await db.evidenceArtifact.findUnique({
-      where: { id: input.sourceEvidenceArtifactId },
-      select: { id: true },
-    });
-    if (!evidence) throw Object.assign(new Error('Evidence artifact not found.'), { statusCode: 404 });
-  }
-
-  const semanticBasis = {
-    version: 'noeone.execution-capability-manifest.v1',
+  const normalized = {
     actorId: input.actorId,
     executionId: input.executionId,
-    framework,
-    frameworkVersion,
-    issuer,
-    externalReference,
+    framework: required(input.framework, 'framework', 120).toLowerCase(),
+    frameworkVersion: optional(input.frameworkVersion, 120),
+    issuer: required(input.issuer, 'issuer', 500),
+    externalReference: optional(input.externalReference),
     sourceEvidenceArtifactId: input.sourceEvidenceArtifactId ?? null,
-    capabilities,
-    tools,
-    modelRef,
-    runtimeRef,
-    effectiveAt: effectiveAt.toISOString(),
-    expiresAt: expiresAt?.toISOString() ?? null,
+    capabilities: labelSet(input.capabilities, 'capabilities'),
+    tools: labelSet(input.tools, 'tools'),
+    modelRef: optional(input.modelRef, 500),
+    runtimeRef: optional(input.runtimeRef, 500),
+    effectiveAt,
+    expiresAt,
   };
-  const manifestDigest = sha256(semanticBasis);
+  const manifestDigest = sha256(manifestBasis(normalized));
 
-  const existing = await findManifestByIdempotency(input.idempotencyKey);
+  const existing = await manifestByKey(input.idempotencyKey);
   if (existing) {
     if (existing.manifestDigest !== manifestDigest) {
-      throw new CapabilityContinuityConflictError(
-        'Capability-manifest idempotency key was reused with different input.',
-      );
+      throw new CapabilityContinuityConflictError('Manifest idempotency key was reused.');
     }
     return { replayed: true, manifest: existing };
   }
 
-  const sameRows = await db.$queryRaw<ExecutionCapabilityManifestRow[]>(Prisma.sql`
-    SELECT * FROM "ExecutionCapabilityManifest"
-    WHERE "executionId" = ${input.executionId}
-      AND "issuer" = ${issuer}
-      AND "manifestDigest" = ${manifestDigest}
-    LIMIT 1
-  `);
-  if (sameRows[0]) return { replayed: true, manifest: sameRows[0] };
-
+  const capabilitiesSql = textArray(normalized.capabilities);
+  const toolsSql = textArray(normalized.tools);
   const id = `capman_${randomUUID()}`;
-  const capabilityArray = textArray(capabilities);
-  const toolArray = textArray(tools);
   const rows = await db.$queryRaw<ExecutionCapabilityManifestRow[]>(Prisma.sql`
     INSERT INTO "ExecutionCapabilityManifest" (
       "id", "actorId", "executionId", "framework", "frameworkVersion", "issuer",
-      "externalReference", "sourceEvidenceArtifactId", "capabilities", "tools",
-      "modelRef", "runtimeRef", "effectiveAt", "expiresAt", "manifestDigest",
-      "idempotencyKey", "metadata"
+      "externalReference", "sourceEvidenceArtifactId", "capabilities", "tools", "modelRef",
+      "runtimeRef", "effectiveAt", "expiresAt", "manifestDigest", "idempotencyKey", "metadata"
     ) VALUES (
-      ${id}, ${input.actorId}, ${input.executionId}, ${framework}, ${frameworkVersion}, ${issuer},
-      ${externalReference}, ${input.sourceEvidenceArtifactId ?? null}, ${capabilityArray}, ${toolArray},
-      ${modelRef}, ${runtimeRef}, ${effectiveAt}, ${expiresAt}, ${manifestDigest},
-      ${input.idempotencyKey}, ${json(input.metadata ?? {})}
-    )
-    ON CONFLICT DO NOTHING
-    RETURNING *
+      ${id}, ${normalized.actorId}, ${normalized.executionId}, ${normalized.framework},
+      ${normalized.frameworkVersion}, ${normalized.issuer}, ${normalized.externalReference},
+      ${normalized.sourceEvidenceArtifactId}, ${capabilitiesSql}, ${toolsSql}, ${normalized.modelRef},
+      ${normalized.runtimeRef}, ${effectiveAt}, ${expiresAt}, ${manifestDigest}, ${input.idempotencyKey},
+      ${json(input.metadata ?? {})}
+    ) ON CONFLICT DO NOTHING RETURNING *
   `);
   if (rows[0]) return { replayed: false, manifest: rows[0] };
 
-  const raced = await findManifestByIdempotency(input.idempotencyKey);
-  if (raced && raced.manifestDigest === manifestDigest) return { replayed: true, manifest: raced };
+  const raced = await manifestByKey(input.idempotencyKey);
+  if (raced?.manifestDigest === manifestDigest) return { replayed: true, manifest: raced };
+  const equivalent = await db.$queryRaw<ExecutionCapabilityManifestRow[]>(Prisma.sql`
+    SELECT * FROM "ExecutionCapabilityManifest"
+    WHERE "executionId" = ${normalized.executionId} AND "issuer" = ${normalized.issuer}
+      AND "manifestDigest" = ${manifestDigest} LIMIT 1
+  `);
+  if (equivalent[0]) return { replayed: true, manifest: equivalent[0] };
   throw new CapabilityContinuityConflictError('Capability manifest insert conflicted.');
 }
 
 export async function recordAuthorityAdmissibilityAssessment(
   input: AuthorityAdmissibilityAssessmentInput,
 ) {
-  const [grant, execution] = await Promise.all([
-    grantContext(input.grantId),
-    executionContext(input.executionId),
-  ]);
+  const [grant, execution] = await Promise.all([getGrant(input.grantId), getExecution(input.executionId)]);
   if (grant.subjectActorId !== execution.actorId) {
     throw new CapabilityContinuityConflictError('Grant and execution do not belong to the same actor.');
   }
+  await requireEvidence(input.sourceEvidenceArtifactId);
 
-  const evaluator = normalizeRequired(input.evaluator, 'evaluator', 500);
-  const method = normalizeRequired(input.method, 'method', 240).toLowerCase();
-  const methodVersion = normalizeRequired(input.methodVersion, 'methodVersion', 120);
-  const reasons = normalizeReasons(input.reasons);
   const assessedAt = input.assessedAt ?? new Date();
   const validUntil = input.validUntil ?? null;
-
-  if (validUntil && validUntil.getTime() <= assessedAt.getTime()) {
+  if (validUntil && validUntil <= assessedAt) {
     throw new CapabilityContinuityValidationError('validUntil must be later than assessedAt.');
   }
-  if (
-    input.disposition !== 'REVIEW_REQUIRED' &&
-    (input.capabilityManifestId === undefined || input.capabilityManifestId === null)
-  ) {
+  if (input.disposition !== 'REVIEW_REQUIRED' && !input.capabilityManifestId) {
     throw new CapabilityContinuityValidationError(
       'A capability manifest is required unless disposition is REVIEW_REQUIRED.',
     );
@@ -376,50 +340,42 @@ export async function recordAuthorityAdmissibilityAssessment(
 
   let manifest: ExecutionCapabilityManifestRow | null = null;
   if (input.capabilityManifestId) {
-    manifest = await findManifestById(input.capabilityManifestId);
+    manifest = await getManifest(input.capabilityManifestId);
     if (!manifest) throw Object.assign(new Error('Capability manifest not found.'), { statusCode: 404 });
     if (manifest.actorId !== execution.actorId || manifest.executionId !== execution.id) {
-      throw new CapabilityContinuityConflictError(
-        'Capability manifest does not belong to the grant actor/execution.',
-      );
+      throw new CapabilityContinuityConflictError('Manifest does not match actor/execution.');
     }
-    if (manifest.effectiveAt.getTime() > assessedAt.getTime()) {
-      throw new CapabilityContinuityConflictError('Capability manifest was not yet effective at assessedAt.');
-    }
-    if (manifest.expiresAt && manifest.expiresAt.getTime() <= assessedAt.getTime()) {
-      throw new CapabilityContinuityConflictError('Capability manifest was expired at assessedAt.');
+    if (manifest.effectiveAt > assessedAt || (manifest.expiresAt && manifest.expiresAt <= assessedAt)) {
+      throw new CapabilityContinuityConflictError('Manifest is not current at assessedAt.');
     }
   }
 
-  if (input.sourceEvidenceArtifactId) {
-    const evidence = await db.evidenceArtifact.findUnique({
-      where: { id: input.sourceEvidenceArtifactId },
-      select: { id: true },
-    });
-    if (!evidence) throw Object.assign(new Error('Evidence artifact not found.'), { statusCode: 404 });
-  }
-
+  const normalizedReasons = reasons(input.reasons);
+  const evaluator = required(input.evaluator, 'evaluator', 500);
+  const method = required(input.method, 'method', 240).toLowerCase();
+  const methodVersion = required(input.methodVersion, 'methodVersion', 120);
+  const grantSnapshot = {
+    id: grant.id,
+    status: grant.status,
+    actions: [...grant.actions].sort(),
+    resources: [...grant.resources].sort(),
+    notBefore: grant.notBefore.toISOString(),
+    expiresAt: grant.expiresAt?.toISOString() ?? null,
+  };
+  const executionSnapshot = {
+    id: execution.id,
+    provider: execution.provider,
+    model: execution.model,
+    runtime: execution.runtime,
+    configHash: execution.configHash,
+  };
+  const manifestSnapshot = manifest ? { id: manifest.id, manifestDigest: manifest.manifestDigest } : null;
   const basis = {
     version: 'noeone.authority-admissibility.v1',
     actorId: execution.actorId,
-    grant: {
-      id: grant.id,
-      status: grant.status,
-      actions: [...grant.actions].sort(),
-      resources: [...grant.resources].sort(),
-      notBefore: grant.notBefore.toISOString(),
-      expiresAt: grant.expiresAt?.toISOString() ?? null,
-    },
-    execution: {
-      id: execution.id,
-      provider: execution.provider,
-      model: execution.model,
-      runtime: execution.runtime,
-      configHash: execution.configHash,
-    },
-    capabilityManifest: manifest
-      ? { id: manifest.id, manifestDigest: manifest.manifestDigest }
-      : null,
+    grant: grantSnapshot,
+    execution: executionSnapshot,
+    capabilityManifest: manifestSnapshot,
     disposition: input.disposition,
     evaluator,
     method,
@@ -427,97 +383,71 @@ export async function recordAuthorityAdmissibilityAssessment(
     sourceEvidenceArtifactId: input.sourceEvidenceArtifactId ?? null,
     assessedAt: assessedAt.toISOString(),
     validUntil: validUntil?.toISOString() ?? null,
-    reasons,
+    reasons: normalizedReasons,
   };
   const basisDigest = sha256(basis);
+  const metadata = {
+    ...(input.metadata ?? {}),
+    _noeoneBasis: { grant: grantSnapshot, execution: executionSnapshot, capabilityManifest: manifestSnapshot },
+  };
 
-  const existing = await findAssessmentByIdempotency(input.idempotencyKey);
+  const existing = await assessmentByKey(input.idempotencyKey);
   if (existing) {
     if (existing.basisDigest !== basisDigest) {
-      throw new CapabilityContinuityConflictError(
-        'Admissibility-assessment idempotency key was reused with different input.',
-      );
+      throw new CapabilityContinuityConflictError('Assessment idempotency key was reused.');
     }
     return { replayed: true, assessment: existing };
   }
 
-  const sameRows = await db.$queryRaw<AuthorityAdmissibilityAssessmentRow[]>(Prisma.sql`
-    SELECT * FROM "AuthorityAdmissibilityAssessment"
-    WHERE "basisDigest" = ${basisDigest}
-    LIMIT 1
+  const equivalent = await db.$queryRaw<AuthorityAdmissibilityAssessmentRow[]>(Prisma.sql`
+    SELECT * FROM "AuthorityAdmissibilityAssessment" WHERE "basisDigest" = ${basisDigest} LIMIT 1
   `);
-  if (sameRows[0]) return { replayed: true, assessment: sameRows[0] };
+  if (equivalent[0]) return { replayed: true, assessment: equivalent[0] };
 
   const id = `admit_${randomUUID()}`;
-  const reasonArray = textArray(reasons);
+  const reasonsSql = textArray(normalizedReasons);
   const rows = await db.$queryRaw<AuthorityAdmissibilityAssessmentRow[]>(Prisma.sql`
     INSERT INTO "AuthorityAdmissibilityAssessment" (
       "id", "actorId", "grantId", "executionId", "capabilityManifestId", "disposition",
-      "evaluator", "method", "methodVersion", "sourceEvidenceArtifactId", "assessedAt",
-      "validUntil", "reasons", "basisDigest", "idempotencyKey", "metadata"
+      "evaluator", "method", "methodVersion", "sourceEvidenceArtifactId", "assessedAt", "validUntil",
+      "reasons", "basisDigest", "idempotencyKey", "metadata"
     ) VALUES (
       ${id}, ${execution.actorId}, ${grant.id}, ${execution.id}, ${manifest?.id ?? null},
       ${input.disposition}, ${evaluator}, ${method}, ${methodVersion},
-      ${input.sourceEvidenceArtifactId ?? null}, ${assessedAt}, ${validUntil}, ${reasonArray},
-      ${basisDigest}, ${input.idempotencyKey}, ${json(input.metadata ?? {})}
-    )
-    ON CONFLICT DO NOTHING
-    RETURNING *
+      ${input.sourceEvidenceArtifactId ?? null}, ${assessedAt}, ${validUntil}, ${reasonsSql},
+      ${basisDigest}, ${input.idempotencyKey}, ${json(metadata)}
+    ) ON CONFLICT DO NOTHING RETURNING *
   `);
   if (rows[0]) return { replayed: false, assessment: rows[0] };
 
-  const raced = await findAssessmentByIdempotency(input.idempotencyKey);
-  if (raced && raced.basisDigest === basisDigest) return { replayed: true, assessment: raced };
+  const raced = await assessmentByKey(input.idempotencyKey);
+  if (raced?.basisDigest === basisDigest) return { replayed: true, assessment: raced };
   throw new CapabilityContinuityConflictError('Admissibility assessment insert conflicted.');
 }
 
-export async function getAuthorityAdmissibilityState(
-  grantId: string,
-  executionId: string,
-  at = new Date(),
-) {
-  const [grant, execution] = await Promise.all([grantContext(grantId), executionContext(executionId)]);
+export async function getAuthorityAdmissibilityState(grantId: string, executionId: string, at = new Date()) {
+  const [grant, execution] = await Promise.all([getGrant(grantId), getExecution(executionId)]);
   if (grant.subjectActorId !== execution.actorId) {
     throw new CapabilityContinuityConflictError('Grant and execution do not belong to the same actor.');
   }
-
   const manifests = await db.$queryRaw<ExecutionCapabilityManifestRow[]>(Prisma.sql`
     SELECT * FROM "ExecutionCapabilityManifest"
-    WHERE "actorId" = ${execution.actorId}
-      AND "executionId" = ${executionId}
-      AND "effectiveAt" <= ${at}
-      AND ("expiresAt" IS NULL OR "expiresAt" > ${at})
-    ORDER BY "effectiveAt" DESC, "createdAt" DESC, "id" DESC
-    LIMIT 100
+    WHERE "actorId" = ${execution.actorId} AND "executionId" = ${executionId}
+      AND "effectiveAt" <= ${at} AND ("expiresAt" IS NULL OR "expiresAt" > ${at})
+    ORDER BY "effectiveAt" DESC, "createdAt" DESC, "id" DESC LIMIT 100
   `);
-
   const assessments = await db.$queryRaw<AuthorityAdmissibilityAssessmentRow[]>(Prisma.sql`
-    SELECT a.*
-    FROM "AuthorityAdmissibilityAssessment" a
+    SELECT a.* FROM "AuthorityAdmissibilityAssessment" a
     LEFT JOIN "ExecutionCapabilityManifest" m ON m."id" = a."capabilityManifestId"
-    WHERE a."grantId" = ${grantId}
-      AND a."executionId" = ${executionId}
-      AND a."assessedAt" <= ${at}
-      AND (a."validUntil" IS NULL OR a."validUntil" > ${at})
-      AND (
-        a."capabilityManifestId" IS NULL OR
-        (m."effectiveAt" <= ${at} AND (m."expiresAt" IS NULL OR m."expiresAt" > ${at}))
-      )
-    ORDER BY a."assessedAt" DESC, a."createdAt" DESC, a."id" DESC
-    LIMIT 500
+    WHERE a."grantId" = ${grantId} AND a."executionId" = ${executionId}
+      AND a."assessedAt" <= ${at} AND (a."validUntil" IS NULL OR a."validUntil" > ${at})
+      AND (a."capabilityManifestId" IS NULL OR
+           (m."effectiveAt" <= ${at} AND (m."expiresAt" IS NULL OR m."expiresAt" > ${at})))
+    ORDER BY a."assessedAt" DESC, a."createdAt" DESC, a."id" DESC LIMIT 500
   `);
-
-  const dispositions = [...new Set(assessments.map((assessment) => assessment.disposition))].sort();
+  const dispositions = [...new Set(assessments.map((row) => row.disposition))].sort();
   const state: CapabilityContinuityState =
     manifests.length === 0 ? 'EVIDENCE_MISSING' : assessments.length === 0 ? 'REVIEW_REQUIRED' : 'ASSESSED';
-
-  const dispositionCounts = Object.fromEntries(
-    dispositions.map((disposition) => [
-      disposition,
-      assessments.filter((assessment) => assessment.disposition === disposition).length,
-    ]),
-  );
-
   return {
     version: 'noeone.authority-admissibility-state.v1',
     actorId: execution.actorId,
@@ -528,7 +458,9 @@ export async function getAuthorityAdmissibilityState(
     capabilityManifestCount: manifests.length,
     assessmentCount: assessments.length,
     disagreement: dispositions.length > 1,
-    dispositionCounts,
+    dispositionCounts: Object.fromEntries(
+      dispositions.map((value) => [value, assessments.filter((row) => row.disposition === value).length]),
+    ),
     manifests,
     assessments,
   };
@@ -540,206 +472,118 @@ export async function getActorCapabilityContinuitySummary(actorId: string, at = 
     select: { id: true, handle: true, displayName: true },
   });
   if (!actor) throw Object.assign(new Error('Actor not found.'), { statusCode: 404 });
-
-  const executionRows = await db.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-    SELECT "id" FROM "ActorExecution"
-    WHERE "actorId" = ${actorId}
-      AND "startedAt" <= ${at}
-      AND ("endedAt" IS NULL OR "endedAt" > ${at})
-    ORDER BY "startedAt" DESC, "id" DESC
-    LIMIT 1
+  const executions = await db.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT "id" FROM "ActorExecution" WHERE "actorId" = ${actorId}
+      AND "startedAt" <= ${at} AND ("endedAt" IS NULL OR "endedAt" > ${at})
+    ORDER BY "startedAt" DESC, "id" DESC LIMIT 1
   `);
-  const executionId = executionRows[0]?.id ?? null;
+  const executionId = executions[0]?.id ?? null;
   if (!executionId) {
     return {
-      version: 'noeone.capability-continuity-summary.v1',
-      actor,
-      at,
-      executionId: null,
-      capabilityManifestCount: 0,
-      activeGrantCount: 0,
-      assessedGrantCount: 0,
-      unassessedGrantCount: 0,
-      dispositionCounts: {},
+      version: 'noeone.capability-continuity-summary.v1', actor, at, executionId: null,
+      capabilityManifestCount: 0, activeGrantCount: 0, assessedGrantCount: 0,
+      unassessedGrantCount: 0, dispositionCounts: {},
     };
   }
-
-  const countRows = await db.$queryRaw<
-    Array<{
-      manifestCount: bigint;
-      activeGrantCount: bigint;
-      assessedGrantCount: bigint;
-    }>
-  >(Prisma.sql`
+  const counts = await db.$queryRaw<Array<{ manifests: bigint; grants: bigint; assessed: bigint }>>(Prisma.sql`
     SELECT
-      (SELECT count(*) FROM "ExecutionCapabilityManifest" m
-       WHERE m."actorId" = ${actorId}
-         AND m."executionId" = ${executionId}
-         AND m."effectiveAt" <= ${at}
-         AND (m."expiresAt" IS NULL OR m."expiresAt" > ${at})) AS "manifestCount",
-      (SELECT count(*) FROM "AuthorityGrant" g
-       WHERE g."subjectActorId" = ${actorId}
-         AND g."status" = 'ACTIVE'
-         AND g."notBefore" <= ${at}
-         AND (g."expiresAt" IS NULL OR g."expiresAt" > ${at})) AS "activeGrantCount",
-      (SELECT count(DISTINCT a."grantId")
-       FROM "AuthorityAdmissibilityAssessment" a
+      (SELECT count(*) FROM "ExecutionCapabilityManifest" m WHERE m."actorId" = ${actorId}
+       AND m."executionId" = ${executionId} AND m."effectiveAt" <= ${at}
+       AND (m."expiresAt" IS NULL OR m."expiresAt" > ${at})) AS "manifests",
+      (SELECT count(*) FROM "AuthorityGrant" g WHERE g."subjectActorId" = ${actorId}
+       AND g."status" = 'ACTIVE' AND g."notBefore" <= ${at}
+       AND (g."expiresAt" IS NULL OR g."expiresAt" > ${at})) AS "grants",
+      (SELECT count(DISTINCT a."grantId") FROM "AuthorityAdmissibilityAssessment" a
        JOIN "AuthorityGrant" g ON g."id" = a."grantId"
        LEFT JOIN "ExecutionCapabilityManifest" m ON m."id" = a."capabilityManifestId"
-       WHERE a."actorId" = ${actorId}
-         AND a."executionId" = ${executionId}
-         AND g."status" = 'ACTIVE'
-         AND g."notBefore" <= ${at}
-         AND (g."expiresAt" IS NULL OR g."expiresAt" > ${at})
-         AND a."assessedAt" <= ${at}
-         AND (a."validUntil" IS NULL OR a."validUntil" > ${at})
-         AND (a."capabilityManifestId" IS NULL OR
-              (m."effectiveAt" <= ${at} AND (m."expiresAt" IS NULL OR m."expiresAt" > ${at}))))
-       AS "assessedGrantCount"
+       WHERE a."actorId" = ${actorId} AND a."executionId" = ${executionId}
+       AND g."status" = 'ACTIVE' AND g."notBefore" <= ${at}
+       AND (g."expiresAt" IS NULL OR g."expiresAt" > ${at})
+       AND a."assessedAt" <= ${at} AND (a."validUntil" IS NULL OR a."validUntil" > ${at})
+       AND (a."capabilityManifestId" IS NULL OR
+            (m."effectiveAt" <= ${at} AND (m."expiresAt" IS NULL OR m."expiresAt" > ${at})))) AS "assessed"
   `);
-  const counts = countRows[0] ?? { manifestCount: 0n, activeGrantCount: 0n, assessedGrantCount: 0n };
-
-  const dispositionRows = await db.$queryRaw<Array<{ disposition: string; count: bigint }>>(Prisma.sql`
-    SELECT a."disposition", count(*) AS "count"
-    FROM "AuthorityAdmissibilityAssessment" a
+  const row = counts[0] ?? { manifests: 0n, grants: 0n, assessed: 0n };
+  const dispositions = await db.$queryRaw<Array<{ disposition: string; count: bigint }>>(Prisma.sql`
+    SELECT a."disposition", count(*) AS "count" FROM "AuthorityAdmissibilityAssessment" a
     LEFT JOIN "ExecutionCapabilityManifest" m ON m."id" = a."capabilityManifestId"
-    WHERE a."actorId" = ${actorId}
-      AND a."executionId" = ${executionId}
-      AND a."assessedAt" <= ${at}
-      AND (a."validUntil" IS NULL OR a."validUntil" > ${at})
+    WHERE a."actorId" = ${actorId} AND a."executionId" = ${executionId}
+      AND a."assessedAt" <= ${at} AND (a."validUntil" IS NULL OR a."validUntil" > ${at})
       AND (a."capabilityManifestId" IS NULL OR
            (m."effectiveAt" <= ${at} AND (m."expiresAt" IS NULL OR m."expiresAt" > ${at})))
-    GROUP BY a."disposition"
-    ORDER BY a."disposition"
+    GROUP BY a."disposition" ORDER BY a."disposition"
   `);
-
-  const activeGrantCount = Number(counts.activeGrantCount);
-  const assessedGrantCount = Number(counts.assessedGrantCount);
+  const grantCount = Number(row.grants);
+  const assessedCount = Number(row.assessed);
   return {
-    version: 'noeone.capability-continuity-summary.v1',
-    actor,
-    at,
-    executionId,
-    capabilityManifestCount: Number(counts.manifestCount),
-    activeGrantCount,
-    assessedGrantCount,
-    unassessedGrantCount: Math.max(0, activeGrantCount - assessedGrantCount),
-    dispositionCounts: Object.fromEntries(
-      dispositionRows.map((row) => [row.disposition, Number(row.count)]),
-    ),
+    version: 'noeone.capability-continuity-summary.v1', actor, at, executionId,
+    capabilityManifestCount: Number(row.manifests), activeGrantCount: grantCount,
+    assessedGrantCount: assessedCount, unassessedGrantCount: Math.max(0, grantCount - assessedCount),
+    dispositionCounts: Object.fromEntries(dispositions.map((item) => [item.disposition, Number(item.count)])),
   };
+}
+
+function basisSnapshot(metadata: Prisma.JsonValue):
+  | { grant: unknown; execution: unknown; capabilityManifest: unknown }
+  | null {
+  if (!metadata || Array.isArray(metadata) || typeof metadata !== 'object') return null;
+  const value = (metadata as Record<string, unknown>)._noeoneBasis;
+  if (!value || Array.isArray(value) || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  if (!('grant' in record) || !('execution' in record) || !('capabilityManifest' in record)) return null;
+  return { grant: record.grant, execution: record.execution, capabilityManifest: record.capabilityManifest };
 }
 
 export async function verifyCapabilityContinuity(actorId: string, limit = 2_000) {
   if (!Number.isInteger(limit) || limit < 1 || limit > 10_000) {
-    throw new CapabilityContinuityValidationError('limit must be an integer between 1 and 10000.');
+    throw new CapabilityContinuityValidationError('limit must be between 1 and 10000.');
   }
-
   const actor = await db.actor.findUnique({ where: { id: actorId }, select: { id: true } });
   if (!actor) throw Object.assign(new Error('Actor not found.'), { statusCode: 404 });
-
   const manifests = await db.$queryRaw<ExecutionCapabilityManifestRow[]>(Prisma.sql`
-    SELECT * FROM "ExecutionCapabilityManifest"
-    WHERE "actorId" = ${actorId}
-    ORDER BY "effectiveAt" ASC, "createdAt" ASC, "id" ASC
-    LIMIT ${limit + 1}
+    SELECT * FROM "ExecutionCapabilityManifest" WHERE "actorId" = ${actorId}
+    ORDER BY "effectiveAt", "createdAt", "id" LIMIT ${limit + 1}
   `);
-  if (manifests.length > limit) {
+  const assessments = await db.$queryRaw<AuthorityAdmissibilityAssessmentRow[]>(Prisma.sql`
+    SELECT * FROM "AuthorityAdmissibilityAssessment" WHERE "actorId" = ${actorId}
+    ORDER BY "assessedAt", "createdAt", "id" LIMIT ${limit + 1}
+  `);
+  if (manifests.length > limit || assessments.length > limit) {
     throw Object.assign(new Error('Capability continuity history is too large for synchronous verification.'), {
       statusCode: 413,
     });
   }
-
-  const assessments = await db.$queryRaw<AuthorityAdmissibilityAssessmentRow[]>(Prisma.sql`
-    SELECT * FROM "AuthorityAdmissibilityAssessment"
-    WHERE "actorId" = ${actorId}
-    ORDER BY "assessedAt" ASC, "createdAt" ASC, "id" ASC
-    LIMIT ${limit + 1}
-  `);
-  if (assessments.length > limit) {
-    throw Object.assign(new Error('Admissibility history is too large for synchronous verification.'), {
-      statusCode: 413,
-    });
-  }
-
   const issues: string[] = [];
   for (const manifest of manifests) {
-    const execution = await executionContext(manifest.executionId);
+    const execution = await getExecution(manifest.executionId);
     if (execution.actorId !== actorId) issues.push(`manifest ${manifest.id} execution actor mismatch`);
-    const expected = sha256({
-      version: 'noeone.execution-capability-manifest.v1',
-      actorId: manifest.actorId,
-      executionId: manifest.executionId,
-      framework: manifest.framework,
-      frameworkVersion: manifest.frameworkVersion,
-      issuer: manifest.issuer,
-      externalReference: manifest.externalReference,
-      sourceEvidenceArtifactId: manifest.sourceEvidenceArtifactId,
-      capabilities: [...manifest.capabilities].sort(),
-      tools: [...manifest.tools].sort(),
-      modelRef: manifest.modelRef,
-      runtimeRef: manifest.runtimeRef,
-      effectiveAt: manifest.effectiveAt.toISOString(),
-      expiresAt: manifest.expiresAt?.toISOString() ?? null,
-    });
-    if (expected !== manifest.manifestDigest) issues.push(`manifest ${manifest.id} digest mismatch`);
+    if (sha256(manifestBasis(manifest)) !== manifest.manifestDigest) {
+      issues.push(`manifest ${manifest.id} digest mismatch`);
+    }
   }
-
   for (const assessment of assessments) {
-    const [grant, execution] = await Promise.all([
-      grantContext(assessment.grantId),
-      executionContext(assessment.executionId),
-    ]);
+    const [grant, execution] = await Promise.all([getGrant(assessment.grantId), getExecution(assessment.executionId)]);
     if (grant.subjectActorId !== actorId || execution.actorId !== actorId) {
       issues.push(`assessment ${assessment.id} actor context mismatch`);
     }
-    let manifest: ExecutionCapabilityManifestRow | null = null;
-    if (assessment.capabilityManifestId) {
-      manifest = await findManifestById(assessment.capabilityManifestId);
-      if (!manifest || manifest.executionId !== assessment.executionId || manifest.actorId !== actorId) {
-        issues.push(`assessment ${assessment.id} manifest context mismatch`);
-        continue;
-      }
+    const snapshot = basisSnapshot(assessment.metadata);
+    if (!snapshot) {
+      issues.push(`assessment ${assessment.id} basis snapshot missing`);
+      continue;
     }
     const expected = sha256({
-      version: 'noeone.authority-admissibility.v1',
-      actorId,
-      grant: {
-        id: grant.id,
-        status: grant.status,
-        actions: [...grant.actions].sort(),
-        resources: [...grant.resources].sort(),
-        notBefore: grant.notBefore.toISOString(),
-        expiresAt: grant.expiresAt?.toISOString() ?? null,
-      },
-      execution: {
-        id: execution.id,
-        provider: execution.provider,
-        model: execution.model,
-        runtime: execution.runtime,
-        configHash: execution.configHash,
-      },
-      capabilityManifest: manifest
-        ? { id: manifest.id, manifestDigest: manifest.manifestDigest }
-        : null,
-      disposition: assessment.disposition,
-      evaluator: assessment.evaluator,
-      method: assessment.method,
+      version: 'noeone.authority-admissibility.v1', actorId,
+      grant: snapshot.grant, execution: snapshot.execution, capabilityManifest: snapshot.capabilityManifest,
+      disposition: assessment.disposition, evaluator: assessment.evaluator, method: assessment.method,
       methodVersion: assessment.methodVersion,
       sourceEvidenceArtifactId: assessment.sourceEvidenceArtifactId,
-      assessedAt: assessment.assessedAt.toISOString(),
-      validUntil: assessment.validUntil?.toISOString() ?? null,
+      assessedAt: assessment.assessedAt.toISOString(), validUntil: assessment.validUntil?.toISOString() ?? null,
       reasons: assessment.reasons,
     });
     if (expected !== assessment.basisDigest) issues.push(`assessment ${assessment.id} basis digest mismatch`);
   }
-
   return {
-    version: 'noeone.capability-continuity-verify.v1',
-    actorId,
-    verified: issues.length === 0,
-    manifestCount: manifests.length,
-    assessmentCount: assessments.length,
-    issues,
+    version: 'noeone.capability-continuity-verify.v1', actorId,
+    verified: issues.length === 0, manifestCount: manifests.length, assessmentCount: assessments.length, issues,
   };
 }
