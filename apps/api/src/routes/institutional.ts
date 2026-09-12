@@ -137,14 +137,11 @@ export async function institutionalRoutes(app: FastifyInstance) {
         id: true,
         kind: true,
         issuer: true,
-        externalId: true,
-        uri: true,
         digest: true,
         digestAlgorithm: true,
         verificationStatus: true,
         observedAt: true,
         verifiedAt: true,
-        metadata: true,
       },
     });
 
@@ -190,6 +187,9 @@ export async function institutionalRoutes(app: FastifyInstance) {
   });
 
   app.get('/v1/commitments/:commitmentId', async (request, reply) => {
+    // The full record may contain private terms/counterparty metadata. Keep it
+    // privileged until scoped disclosure and counterparty consent are modeled.
+    assertAdmin(request);
     const params = z.object({ commitmentId: z.string().min(1) }).parse(request.params);
     const commitment = await db.commitment.findUnique({
       where: { id: params.commitmentId },
@@ -223,7 +223,15 @@ export async function institutionalRoutes(app: FastifyInstance) {
       },
       orderBy: [{ openedAt: 'desc' }, { id: 'desc' }],
       take: query.limit,
-      include: {
+      select: {
+        id: true,
+        kind: true,
+        status: true,
+        termsDigest: true,
+        externalFramework: true,
+        dueAt: true,
+        openedAt: true,
+        closedAt: true,
         creditor: { select: { id: true, handle: true, displayName: true } },
         sourceEvidence: {
           select: {
@@ -236,6 +244,13 @@ export async function institutionalRoutes(app: FastifyInstance) {
         },
         transitions: {
           orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
+          select: {
+            id: true,
+            fromStatus: true,
+            toStatus: true,
+            evidenceRefId: true,
+            occurredAt: true,
+          },
         },
       },
     });
