@@ -62,6 +62,21 @@ enum MatchStatus {
   CANCELLED
 }
 
+enum EvidenceVerificationStatus {
+  CLAIMED
+  VERIFIED
+  REJECTED
+  REVOKED
+}
+
+enum CommitmentStatus {
+  OPEN
+  FULFILLED
+  BREACHED
+  CANCELLED
+  DISPUTED
+}
+
 model User {
   id            String   @id
   email         String   @unique
@@ -139,20 +154,23 @@ model Actor {
   createdAt          DateTime
   updatedAt          DateTime    @updatedAt
 
-  owner                  User?                  @relation(fields: [ownerId], references: [id], onDelete: SetNull)
-  executions             ActorExecution[]
-  lineage                LineageNode[]
-  continuityTransitions  ContinuityTransition[]
-  parentAncestries       ActorAncestry[]         @relation("ancestry_parent")
-  childAncestry          ActorAncestry?          @relation("ancestry_child")
-  events                 ActorEvent[]
-  hostReceipts           HostReceipt[]
-  followers              Follow[]
-  subjectEdges           RelationshipEdge[]      @relation("relationship_subject")
-  objectEdges            RelationshipEdge[]      @relation("relationship_object")
-  matchesA               Match[]                 @relation("match_actor_a")
-  matchesB               Match[]                 @relation("match_actor_b")
-  winnerMatches          Match[]                 @relation("match_winner")
+  owner                 User?                  @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  executions            ActorExecution[]
+  lineage               LineageNode[]
+  continuityTransitions ContinuityTransition[]
+  parentAncestries      ActorAncestry[]         @relation("ancestry_parent")
+  childAncestry         ActorAncestry?          @relation("ancestry_child")
+  events                ActorEvent[]
+  hostReceipts          HostReceipt[]
+  evidenceRefs          EvidenceRef[]
+  debtorCommitments     Commitment[]            @relation("commitment_debtor")
+  creditorCommitments   Commitment[]            @relation("commitment_creditor")
+  followers             Follow[]
+  subjectEdges          RelationshipEdge[]      @relation("relationship_subject")
+  objectEdges           RelationshipEdge[]      @relation("relationship_object")
+  matchesA              Match[]                 @relation("match_actor_a")
+  matchesB              Match[]                 @relation("match_actor_b")
+  winnerMatches         Match[]                 @relation("match_winner")
 
   @@index([ownerId])
   @@index([actorType, status])
@@ -310,9 +328,9 @@ model ActorEvent {
   canonicalStatus    CanonicalStatus @default(ACCEPTED)
   createdAt          DateTime        @default(now())
 
-  actor       Actor            @relation(fields: [actorId], references: [id], onDelete: Cascade)
-  execution   ActorExecution?  @relation(fields: [executionId], references: [id], onDelete: SetNull)
-  host        Host             @relation(fields: [hostId], references: [id], onDelete: Restrict)
+  actor       Actor           @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  execution   ActorExecution? @relation(fields: [executionId], references: [id], onDelete: SetNull)
+  host        Host            @relation(fields: [hostId], references: [id], onDelete: Restrict)
   hostReceipt HostReceipt?
 
   @@unique([actorId, sequence])
@@ -351,6 +369,85 @@ model HostReceipt {
   @@index([actorId, occurredAt])
   @@index([hostId, occurredAt])
   @@index([keyId, receivedAt])
+}
+
+model EvidenceRef {
+  id                 String                     @id
+  actorId            String
+  kind               String
+  issuer             String
+  externalId         String?
+  uri                String?
+  digest             String
+  digestAlgorithm    String                     @default("sha256")
+  verificationStatus EvidenceVerificationStatus @default(CLAIMED)
+  observedAt         DateTime
+  verifiedAt         DateTime?
+  metadata           Json                       @default("{}")
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+
+  actor                 Actor                  @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  sourceCommitments     Commitment[]           @relation("commitment_source_evidence")
+  commitmentTransitions CommitmentTransition[] @relation("commitment_transition_evidence")
+
+  @@unique([issuer, digest])
+  @@index([actorId, observedAt])
+  @@index([actorId, verificationStatus, observedAt])
+  @@index([kind, verificationStatus])
+}
+
+model Commitment {
+  id                  String           @id
+  debtorActorId       String
+  creditorActorId     String?
+  creditorExternalRef String?
+  kind                String
+  status              CommitmentStatus @default(OPEN)
+  termsDigest         String
+  termsUri            String?
+  sourceEvidenceId    String?
+  externalFramework   String?
+  externalReference   String?
+  dueAt               DateTime?
+  openedAt            DateTime         @default(now())
+  closedAt            DateTime?
+  createdByType       String
+  createdById         String?
+  idempotencyKey      String           @unique
+  metadata            Json             @default("{}")
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  debtor         Actor                  @relation("commitment_debtor", fields: [debtorActorId], references: [id], onDelete: Restrict)
+  creditor       Actor?                 @relation("commitment_creditor", fields: [creditorActorId], references: [id], onDelete: Restrict)
+  sourceEvidence EvidenceRef?           @relation("commitment_source_evidence", fields: [sourceEvidenceId], references: [id], onDelete: Restrict)
+  transitions    CommitmentTransition[]
+
+  @@index([debtorActorId, status, dueAt])
+  @@index([creditorActorId, status, dueAt])
+  @@index([sourceEvidenceId])
+  @@index([externalFramework, externalReference])
+}
+
+model CommitmentTransition {
+  id             String            @id
+  commitmentId   String
+  fromStatus     CommitmentStatus?
+  toStatus       CommitmentStatus
+  evidenceRefId  String?
+  reason         String?
+  decidedByType  String
+  decidedById    String?
+  idempotencyKey String            @unique
+  occurredAt     DateTime          @default(now())
+  metadata       Json              @default("{}")
+
+  commitment Commitment   @relation(fields: [commitmentId], references: [id], onDelete: Cascade)
+  evidenceRef EvidenceRef? @relation("commitment_transition_evidence", fields: [evidenceRefId], references: [id], onDelete: Restrict)
+
+  @@index([commitmentId, occurredAt])
+  @@index([evidenceRefId])
 }
 
 model Follow {
