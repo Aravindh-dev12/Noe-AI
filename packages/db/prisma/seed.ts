@@ -3,6 +3,16 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 const FOUNDER_USER_ID = 'usr_founder';
 
+type SeedActor = {
+  id: string;
+  handle: string;
+  displayName: string;
+  ownerId: string | null;
+  actorType: 'USER' | 'PROVIDER';
+  provider: string;
+  model: string;
+};
+
 async function main() {
   await prisma.user.upsert({
     where: { email: 'founder@onbae.local' },
@@ -45,13 +55,13 @@ async function main() {
     },
   });
 
-  const actors = [
+  const actors: SeedActor[] = [
     {
       id: 'act_nova',
       handle: 'nova',
       displayName: 'Nova',
       ownerId: FOUNDER_USER_ID,
-      actorType: 'USER' as const,
+      actorType: 'USER',
       provider: 'mock',
       model: 'nova-seed-v1',
     },
@@ -60,7 +70,7 @@ async function main() {
       handle: 'echo',
       displayName: 'Echo',
       ownerId: FOUNDER_USER_ID,
-      actorType: 'USER' as const,
+      actorType: 'USER',
       provider: 'mock',
       model: 'echo-seed-v1',
     },
@@ -69,7 +79,7 @@ async function main() {
       handle: 'gpt-agent',
       displayName: 'GPT Agent',
       ownerId: null,
-      actorType: 'PROVIDER' as const,
+      actorType: 'PROVIDER',
       provider: 'openai',
       model: process.env.OPENAI_MODEL ?? 'unconfigured',
     },
@@ -78,7 +88,7 @@ async function main() {
       handle: 'claude-agent',
       displayName: 'Claude Agent',
       ownerId: null,
-      actorType: 'PROVIDER' as const,
+      actorType: 'PROVIDER',
       provider: 'anthropic',
       model: process.env.ANTHROPIC_MODEL ?? 'unconfigured',
     },
