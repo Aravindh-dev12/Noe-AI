@@ -93,6 +93,45 @@ enum ConsequenceAttributionDisposition {
   DISPUTED
 }
 
+enum ClaimStatus {
+  FILED
+  RESPONDED
+  UNDER_REVIEW
+  ADJUDICATED
+  SETTLED
+  DISMISSED
+  WITHDRAWN
+}
+
+enum ClaimPartyRole {
+  CLAIMANT
+  RESPONDENT
+  INTERESTED
+}
+
+enum ClaimActorRole {
+  EXECUTOR
+  DELEGATE
+  SUBJECT
+  COUNTERPARTY_AGENT
+  WITNESS
+}
+
+enum AdjudicationDisposition {
+  GRANTED
+  PARTIALLY_GRANTED
+  DENIED
+  DISMISSED
+  NO_JURISDICTION
+}
+
+enum RemedyStatus {
+  ORDERED
+  SATISFIED
+  FAILED
+  CANCELLED
+}
+
 model User {
   id            String   @id
   email         String   @unique
@@ -184,6 +223,7 @@ model Actor {
   authorityGrants         AuthorityGrant[]            @relation("authority_subject")
   authorityExercises      AuthorityExercise[]
   consequenceAttributions ConsequenceAttribution[]
+  claimLinks              ClaimActorLink[]
   followers               Follow[]
   subjectEdges            RelationshipEdge[]         @relation("relationship_subject")
   objectEdges             RelationshipEdge[]         @relation("relationship_object")
@@ -403,14 +443,22 @@ model EvidenceArtifact {
   metadata        Json     @default("{}")
   createdAt       DateTime @default(now())
 
-  bindings                ActorEvidenceBinding[]
-  validations             EvidenceValidation[]
-  sourceCommitments       Commitment[]            @relation("commitment_source_evidence")
-  commitmentTransitions   CommitmentTransition[]  @relation("commitment_transition_evidence")
-  authorityGrants         AuthorityGrant[]         @relation("authority_evidence")
-  authorityExercises      AuthorityExercise[]      @relation("authority_exercise_evidence")
-  consequenceObservations ConsequenceObservation[] @relation("consequence_source_evidence")
-  consequenceAttributions ConsequenceAttribution[] @relation("consequence_attribution_evidence")
+  bindings                     ActorEvidenceBinding[]
+  validations                  EvidenceValidation[]
+  sourceCommitments            Commitment[]             @relation("commitment_source_evidence")
+  commitmentTransitions        CommitmentTransition[]   @relation("commitment_transition_evidence")
+  authorityGrants              AuthorityGrant[]          @relation("authority_evidence")
+  authorityExercises           AuthorityExercise[]       @relation("authority_exercise_evidence")
+  consequenceObservations      ConsequenceObservation[]  @relation("consequence_source_evidence")
+  consequenceAttributions      ConsequenceAttribution[]  @relation("consequence_attribution_evidence")
+  legalContextSources          LegalContextSnapshot[]    @relation("legal_context_source_evidence")
+  legalContextAcceptances      LegalContextSnapshot[]    @relation("legal_context_acceptance_evidence")
+  claimStatements              Claim[]                   @relation("claim_statement_evidence")
+  claimPartyIdentities         ClaimParty[]              @relation("claim_party_identity_evidence")
+  claimEvidenceBindings        ClaimEvidenceBinding[]
+  claimTransitions             ClaimTransition[]         @relation("claim_transition_evidence")
+  adjudicationDecisions        AdjudicationDecision[]    @relation("decision_evidence")
+  remedyTransitions            RemedyTransition[]        @relation("remedy_transition_evidence")
 
   @@unique([issuer, digest])
   @@index([kind, observedAt])
@@ -476,6 +524,7 @@ model Commitment {
   sourceEvidence EvidenceArtifact?        @relation("commitment_source_evidence", fields: [sourceEvidenceArtifactId], references: [id], onDelete: Restrict)
   transitions    CommitmentTransition[]
   consequences   ConsequenceObservation[]
+  claims         Claim[]
 
   @@index([debtorActorId, status, dueAt])
   @@index([creditorActorId, status, dueAt])
@@ -588,6 +637,7 @@ model AuthorityExercise {
   grant        AuthorityGrant   @relation(fields: [grantId], references: [id], onDelete: Restrict)
   evidence     EvidenceArtifact @relation("authority_exercise_evidence", fields: [evidenceArtifactId], references: [id], onDelete: Restrict)
   consequences ConsequenceObservation[]
+  claims       Claim[]
 
   @@index([actorId, exercisedAt])
   @@index([grantId, exercisedAt])
@@ -610,10 +660,11 @@ model ConsequenceObservation {
   metadata                  Json     @default("{}")
   createdAt                 DateTime @default(now())
 
-  sourceEvidence         EvidenceArtifact      @relation("consequence_source_evidence", fields: [sourceEvidenceArtifactId], references: [id], onDelete: Restrict)
-  sourceAuthorityExercise AuthorityExercise?    @relation(fields: [sourceAuthorityExerciseId], references: [id], onDelete: Restrict)
-  commitment             Commitment?           @relation(fields: [commitmentId], references: [id], onDelete: Restrict)
-  attributions           ConsequenceAttribution[]
+  sourceEvidence          EvidenceArtifact        @relation("consequence_source_evidence", fields: [sourceEvidenceArtifactId], references: [id], onDelete: Restrict)
+  sourceAuthorityExercise AuthorityExercise?      @relation(fields: [sourceAuthorityExerciseId], references: [id], onDelete: Restrict)
+  commitment              Commitment?             @relation(fields: [commitmentId], references: [id], onDelete: Restrict)
+  attributions            ConsequenceAttribution[]
+  claims                  Claim[]
 
   @@index([kind, occurredAt])
   @@index([sourceEvidenceArtifactId])
@@ -622,7 +673,7 @@ model ConsequenceObservation {
 }
 
 model ConsequenceAttribution {
-  id                       String                            @id
+  id                       String                             @id
   consequenceId            String
   actorId                  String
   assessmentType           String
@@ -633,9 +684,9 @@ model ConsequenceAttribution {
   scoreBps                 Int?
   sourceEvidenceArtifactId String?
   basisDigest              String
-  idempotencyKey           String                            @unique
-  metadata                 Json                              @default("{}")
-  createdAt                DateTime                          @default(now())
+  idempotencyKey           String                             @unique
+  metadata                 Json                               @default("{}")
+  createdAt                DateTime                           @default(now())
 
   consequence    ConsequenceObservation @relation(fields: [consequenceId], references: [id], onDelete: Cascade)
   actor          Actor                  @relation(fields: [actorId], references: [id], onDelete: Restrict)
@@ -645,6 +696,229 @@ model ConsequenceAttribution {
   @@index([consequenceId, createdAt])
   @@index([method, methodVersion])
   @@index([sourceEvidenceArtifactId])
+}
+
+model LegalContextSnapshot {
+  id                           String   @id
+  framework                    String
+  termsDigest                  String
+  termsUri                     String?
+  disputeClauseDigest          String?
+  method                       String?
+  jurisdiction                 String?
+  forumRef                     String?
+  acceptanceEvidenceArtifactId String?
+  sourceEvidenceArtifactId     String?
+  effectiveAt                  DateTime
+  capturedAt                   DateTime @default(now())
+  contextDigest                String
+  idempotencyKey               String   @unique
+  metadata                     Json     @default("{}")
+
+  acceptanceEvidence EvidenceArtifact?     @relation("legal_context_acceptance_evidence", fields: [acceptanceEvidenceArtifactId], references: [id], onDelete: Restrict)
+  sourceEvidence     EvidenceArtifact?     @relation("legal_context_source_evidence", fields: [sourceEvidenceArtifactId], references: [id], onDelete: Restrict)
+  claims             Claim[]
+  decisions          AdjudicationDecision[]
+
+  @@index([framework, effectiveAt])
+  @@index([termsDigest])
+  @@index([disputeClauseDigest])
+  @@index([forumRef])
+}
+
+model Claim {
+  id                          String      @id
+  claimType                   String
+  status                      ClaimStatus @default(FILED)
+  consequenceId               String?
+  commitmentId                String?
+  authorityExerciseId         String?
+  legalContextSnapshotId      String?
+  statementEvidenceArtifactId String
+  claimDigest                 String
+  amountMinor                 String?
+  currency                    String?
+  externalFramework           String?
+  externalReference           String?
+  appealOfClaimId             String?
+  filedAt                     DateTime
+  idempotencyKey              String      @unique
+  metadata                    Json        @default("{}")
+  createdAt                   DateTime    @default(now())
+  updatedAt                   DateTime    @updatedAt
+
+  consequence          ConsequenceObservation? @relation(fields: [consequenceId], references: [id], onDelete: Restrict)
+  commitment           Commitment?            @relation(fields: [commitmentId], references: [id], onDelete: Restrict)
+  authorityExercise    AuthorityExercise?      @relation(fields: [authorityExerciseId], references: [id], onDelete: Restrict)
+  legalContext         LegalContextSnapshot?   @relation(fields: [legalContextSnapshotId], references: [id], onDelete: Restrict)
+  statementEvidence    EvidenceArtifact        @relation("claim_statement_evidence", fields: [statementEvidenceArtifactId], references: [id], onDelete: Restrict)
+  appealOf             Claim?                  @relation("claim_appeal", fields: [appealOfClaimId], references: [id], onDelete: Restrict)
+  appeals              Claim[]                 @relation("claim_appeal")
+  parties              ClaimParty[]
+  actorLinks           ClaimActorLink[]
+  evidenceBindings     ClaimEvidenceBinding[]
+  transitions          ClaimTransition[]
+  decisions            AdjudicationDecision[]
+  remedies             RemedyOrder[]
+
+  @@index([status, filedAt])
+  @@index([consequenceId])
+  @@index([commitmentId])
+  @@index([authorityExerciseId])
+  @@index([legalContextSnapshotId])
+  @@index([appealOfClaimId])
+  @@index([externalFramework, externalReference])
+}
+
+model ClaimParty {
+  id                         String         @id
+  claimId                    String
+  role                       ClaimPartyRole
+  principalType              String
+  principalRef               String
+  identityEvidenceArtifactId String?
+  createdAt                  DateTime       @default(now())
+  metadata                   Json           @default("{}")
+
+  claim            Claim             @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  identityEvidence EvidenceArtifact? @relation("claim_party_identity_evidence", fields: [identityEvidenceArtifactId], references: [id], onDelete: Restrict)
+  evidenceBindings ClaimEvidenceBinding[]
+  remedyObligations RemedyOrder[]     @relation("remedy_obligor_party")
+  remedyBenefits    RemedyOrder[]     @relation("remedy_beneficiary_party")
+
+  @@unique([claimId, role, principalType, principalRef])
+  @@index([principalType, principalRef])
+  @@index([identityEvidenceArtifactId])
+}
+
+model ClaimActorLink {
+  id        String         @id
+  claimId   String
+  actorId   String
+  role      ClaimActorRole
+  createdAt DateTime       @default(now())
+  metadata  Json           @default("{}")
+
+  claim Claim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  actor Actor @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@unique([claimId, actorId, role])
+  @@index([actorId, createdAt])
+}
+
+model ClaimEvidenceBinding {
+  id                 String   @id
+  claimId            String
+  evidenceArtifactId String
+  role               String
+  submittedByPartyId String?
+  submittedAt        DateTime @default(now())
+  idempotencyKey     String   @unique
+  metadata           Json     @default("{}")
+
+  claim       Claim            @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  evidence    EvidenceArtifact @relation(fields: [evidenceArtifactId], references: [id], onDelete: Restrict)
+  submittedBy ClaimParty?      @relation(fields: [submittedByPartyId], references: [id], onDelete: Restrict)
+
+  @@index([claimId, submittedAt])
+  @@index([evidenceArtifactId])
+  @@index([submittedByPartyId])
+}
+
+model ClaimTransition {
+  id                 String      @id
+  claimId            String
+  fromStatus         ClaimStatus?
+  toStatus           ClaimStatus
+  evidenceArtifactId String?
+  decidedByType      String
+  decidedByRef       String?
+  reason             String?
+  occurredAt         DateTime    @default(now())
+  idempotencyKey     String      @unique
+  metadata           Json        @default("{}")
+
+  claim    Claim             @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  evidence EvidenceArtifact? @relation("claim_transition_evidence", fields: [evidenceArtifactId], references: [id], onDelete: Restrict)
+
+  @@index([claimId, occurredAt])
+  @@index([evidenceArtifactId])
+}
+
+model AdjudicationDecision {
+  id                         String                  @id
+  claimId                    String
+  disposition                AdjudicationDisposition
+  adjudicatorType            String
+  adjudicatorRef             String
+  decisionEvidenceArtifactId String
+  decisionDigest             String
+  legalContextSnapshotId     String?
+  decidedAt                  DateTime
+  externalFramework          String?
+  externalReference          String?
+  idempotencyKey             String                  @unique
+  metadata                   Json                    @default("{}")
+  createdAt                  DateTime                @default(now())
+
+  claim            Claim                @relation(fields: [claimId], references: [id], onDelete: Restrict)
+  decisionEvidence EvidenceArtifact     @relation("decision_evidence", fields: [decisionEvidenceArtifactId], references: [id], onDelete: Restrict)
+  legalContext     LegalContextSnapshot? @relation(fields: [legalContextSnapshotId], references: [id], onDelete: Restrict)
+  remedies         RemedyOrder[]
+
+  @@index([claimId, decidedAt])
+  @@index([adjudicatorType, adjudicatorRef])
+  @@index([decisionEvidenceArtifactId])
+  @@index([externalFramework, externalReference])
+}
+
+model RemedyOrder {
+  id                          String       @id
+  claimId                     String
+  decisionId                  String?
+  kind                        String
+  obligorPrincipalPartyId     String
+  beneficiaryPrincipalPartyId String
+  amountMinor                 String?
+  currency                    String?
+  termsDigest                 String
+  dueAt                       DateTime?
+  status                      RemedyStatus @default(ORDERED)
+  idempotencyKey              String       @unique
+  metadata                    Json         @default("{}")
+  createdAt                   DateTime     @default(now())
+  updatedAt                   DateTime     @updatedAt
+
+  claim       Claim                @relation(fields: [claimId], references: [id], onDelete: Restrict)
+  decision    AdjudicationDecision? @relation(fields: [decisionId], references: [id], onDelete: Restrict)
+  obligor     ClaimParty           @relation("remedy_obligor_party", fields: [obligorPrincipalPartyId], references: [id], onDelete: Restrict)
+  beneficiary ClaimParty           @relation("remedy_beneficiary_party", fields: [beneficiaryPrincipalPartyId], references: [id], onDelete: Restrict)
+  transitions RemedyTransition[]
+
+  @@index([claimId, status, dueAt])
+  @@index([decisionId])
+  @@index([obligorPrincipalPartyId])
+  @@index([beneficiaryPrincipalPartyId])
+}
+
+model RemedyTransition {
+  id                 String       @id
+  remedyId           String
+  fromStatus         RemedyStatus?
+  toStatus           RemedyStatus
+  evidenceArtifactId String?
+  decidedByType      String
+  decidedByRef       String?
+  reason             String?
+  occurredAt         DateTime     @default(now())
+  idempotencyKey     String       @unique
+  metadata           Json         @default("{}")
+
+  remedy   RemedyOrder       @relation(fields: [remedyId], references: [id], onDelete: Cascade)
+  evidence EvidenceArtifact? @relation("remedy_transition_evidence", fields: [evidenceArtifactId], references: [id], onDelete: Restrict)
+
+  @@index([remedyId, occurredAt])
+  @@index([evidenceArtifactId])
 }
 
 model Follow {
