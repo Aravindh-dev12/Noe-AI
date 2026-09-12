@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { db } from '@onbae/db';
 import { z } from 'zod';
 
-import { assertAdmin } from '../lib/auth.js';
+import { assertActorControl, requirePrincipal } from '../lib/auth.js';
 import { matchQueue } from '../lib/queue.js';
 
 const createMatchSchema = z.object({
@@ -14,54 +14,78 @@ const createMatchSchema = z.object({
 });
 
 export async function matchRoutes(app: FastifyInstance) {
-  app.post('/v1/matches', async (request, reply) => {
-    assertAdmin(request);
-    const input = createMatchSchema.parse(request.body);
-
-    if (input.actorAId === input.actorBId) {
-      return reply.code(400).send({ error: 'actors_must_be_distinct' });
-    }
-
-    const [actorA, actorB, environment] = await Promise.all([
-      db.actor.findUnique({ where: { id: input.actorAId } }),
-      db.actor.findUnique({ where: { id: input.actorBId } }),
-      db.environment.findUnique({ where: { id: input.environmentId } }),
-    ]);
-
-    if (!actorA || !actorB) {
-      return reply.code(404).send({ error: 'actor_not_found' });
-    }
-    if (!environment || environment.status !== 'ACTIVE') {
-      return reply.code(404).send({ error: 'environment_not_found' });
-    }
-
-    const matchId = `match_${randomUUID()}`;
-    const match = await db.match.create({
-      data: {
-        id: matchId,
-        environmentId: environment.id,
-        actorAId: actorA.id,
-        actorBId: actorB.id,
-        seed: input.seed ?? null,
-        status: 'SCHEDULED',
+  app.post(
+    '/v1/matches',
+    {
+      config: {
+        rateLimit: {
+          max: 30,
+          timeWindow: '1 minute',
+        },
       },
-    });
+    },
+    async (request, reply) => {
+      const principal = await requirePrincipal(request);
+      const input = createMatchSchema.parse(request.body);
 
-    try {
-      await matchQueue.add('run-match', { matchId }, { jobId: matchId });
-    } catch (error) {
-      await db.match.update({
-        where: { id: matchId },
+      if (input.actorAId === input.actorBId) {
+        return reply.code(400).send({ error: 'actors_must_be_distinct' });
+      }
+
+      const [actorA, actorB, environment] = await Promise.all([
+        db.actor.findUnique({ where: { id: input.actorAId } }),
+        db.actor.findUnique({ where: { id: input.actorBId } }),
+        db.environment.findUnique({ where: { id: input.environmentId } }),
+      ]);
+
+      if (!actorA || !actorB) {
+        return reply.code(404).send({ error: 'actor_not_found' });
+      }
+      if (actorA.status !== 'ACTIVE' || actorB.status !== 'ACTIVE') {
+        return reply.code(409).send({ error: 'actor_not_active' });
+      }
+      if (!environment || environment.status !== 'ACTIVE') {
+        return reply.code(404).send({ error: 'environment_not_found' });
+      }
+
+      if (principal.kind === 'user') {
+        assertActorControl(principal, actorA);
+        if (actorB.actorType === 'USER' && actorB.ownerId !== principal.userId) {
+          throw Object.assign(
+            new Error('Cross-owner user-actor challenges require opponent consent.'),
+            { statusCode: 403 },
+          );
+        }
+      }
+
+      const matchId = `match_${randomUUID()}`;
+      const match = await db.match.create({
         data: {
-          status: 'FAILED',
-          error: error instanceof Error ? error.message : 'queue enqueue failed',
+          id: matchId,
+          environmentId: environment.id,
+          actorAId: actorA.id,
+          actorBId: actorB.id,
+          seed: input.seed ?? null,
+          status: 'SCHEDULED',
         },
       });
-      throw error;
-    }
 
-    return reply.code(202).send(match);
-  });
+      try {
+        await matchQueue.add('run-match', { matchId }, { jobId: matchId });
+      } catch (error) {
+        await db.match.update({
+          where: { id: matchId },
+          data: {
+            status: 'FAILED',
+            error: error instanceof Error ? error.message : 'queue enqueue failed',
+          },
+        });
+        throw error;
+      }
+
+      return reply.code(202).send(match);
+    },
+  );
 
   app.get('/v1/matches/:matchId', async (request, reply) => {
     const params = z.object({ matchId: z.string() }).parse(request.params);

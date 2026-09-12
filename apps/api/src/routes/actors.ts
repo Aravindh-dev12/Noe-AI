@@ -1,11 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { createActor, normalizeHandle } from '@onbae/actor-core';
-import { appendCanonicalActorEvent, db, type Prisma } from '@onbae/db';
+import { appendCanonicalActorEvent, db, Prisma } from '@onbae/db';
 import { z } from 'zod';
 
 import { env } from '../env.js';
-import { assertAdmin } from '../lib/auth.js';
+import { assertActorControl, requirePrincipal, requireUserPrincipal } from '../lib/auth.js';
 
 const createActorSchema = z.object({
   handle: z.string().min(3).max(32),
@@ -42,6 +42,17 @@ function executionConfigHash(input: {
 
 function actorTypeToDb(value: 'user' | 'provider' | 'research' | 'organization') {
   return value.toUpperCase() as 'USER' | 'PROVIDER' | 'RESEARCH' | 'ORGANIZATION';
+}
+
+function assertAllowedUserModel(provider: string, model: string): void {
+  const allowed = env.USER_MODELS.some(
+    (candidate) => candidate.provider === provider && candidate.model === model,
+  );
+  if (!allowed) {
+    throw Object.assign(new Error('This model is not enabled for user-owned actors.'), {
+      statusCode: 403,
+    });
+  }
 }
 
 export async function actorRoutes(app: FastifyInstance) {
@@ -85,6 +96,29 @@ export async function actorRoutes(app: FastifyInstance) {
       nextCursor: hasMore ? page.at(-1)?.id ?? null : null,
     };
   });
+
+  app.get('/v1/me/actors', async (request) => {
+    const principal = await requireUserPrincipal(request);
+    return db.actor.findMany({
+      where: { ownerId: principal.userId },
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+      include: {
+        executions: {
+          where: { endedAt: null },
+          orderBy: { startedAt: 'desc' },
+          take: 1,
+          select: { provider: true, model: true, runtime: true, startedAt: true },
+        },
+        _count: {
+          select: { followers: true, events: true, matchesA: true, matchesB: true },
+        },
+      },
+    });
+  });
+
+  app.get('/v1/meta/models', async () => ({
+    userModels: env.USER_MODELS,
+  }));
 
   app.get('/v1/actors/:handle', async (request, reply) => {
     const params = z.object({ handle: z.string() }).parse(request.params);
@@ -139,8 +173,24 @@ export async function actorRoutes(app: FastifyInstance) {
   });
 
   app.post('/v1/actors', async (request, reply) => {
-    assertAdmin(request);
+    const principal = await requirePrincipal(request);
     const input = createActorSchema.parse(request.body);
+
+    const ownerId = principal.kind === 'user' ? principal.userId : (input.ownerId ?? null);
+    const actorType = principal.kind === 'user' ? 'user' : input.actorType;
+
+    if (principal.kind === 'user') {
+      if (input.actorType !== 'user') {
+        throw Object.assign(new Error('Users may only create user-owned actors.'), { statusCode: 403 });
+      }
+      if (input.ownerId && input.ownerId !== principal.userId) {
+        throw Object.assign(new Error('Users cannot assign an actor to another owner.'), {
+          statusCode: 403,
+        });
+      }
+      assertAllowedUserModel(input.provider, input.model);
+    }
+
     const configHash = executionConfigHash({
       provider: input.provider,
       model: input.model,
@@ -149,8 +199,8 @@ export async function actorRoutes(app: FastifyInstance) {
     const aggregate = createActor({
       handle: input.handle,
       displayName: input.displayName,
-      ownerId: input.ownerId ?? null,
-      actorType: input.actorType,
+      ownerId,
+      actorType,
       provider: input.provider,
       model: input.model,
       runtime: input.runtime ?? null,
@@ -159,6 +209,25 @@ export async function actorRoutes(app: FastifyInstance) {
 
     try {
       const actor = await db.$transaction(async (tx) => {
+        if (principal.kind === 'user') {
+          const lockedUsers = await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT "id" FROM "User" WHERE "id" = ${principal.userId} FOR UPDATE
+          `;
+          if (lockedUsers.length !== 1) {
+            throw Object.assign(new Error('Authenticated user no longer exists.'), { statusCode: 401 });
+          }
+
+          const actorCount = await tx.actor.count({
+            where: { ownerId: principal.userId, status: { not: 'RETIRED' } },
+          });
+          if (actorCount >= env.MAX_USER_ACTORS) {
+            throw Object.assign(
+              new Error(`Actor limit reached (${env.MAX_USER_ACTORS}).`),
+              { statusCode: 409 },
+            );
+          }
+        }
+
         const created = await tx.actor.create({
           data: {
             id: aggregate.actor.id,
@@ -224,17 +293,25 @@ export async function actorRoutes(app: FastifyInstance) {
       return reply.code(201).send(actor);
     } catch (error) {
       request.log.warn({ error }, 'actor creation failed');
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw Object.assign(new Error('Actor handle already exists.'), { statusCode: 409 });
+      }
       throw error;
     }
   });
 
   app.post('/v1/actors/:actorId/migrate', async (request, reply) => {
-    assertAdmin(request);
+    const principal = await requirePrincipal(request);
     const params = z.object({ actorId: z.string() }).parse(request.params);
     const input = migrateActorSchema.parse(request.body);
     const now = new Date();
     const nextExecutionId = `exec_${randomUUID()}`;
     const nextLineageId = `lin_${randomUUID()}`;
+
+    if (principal.kind === 'user') {
+      assertAllowedUserModel(input.provider, input.model);
+    }
+
     const configHash = executionConfigHash({
       provider: input.provider,
       model: input.model,
@@ -250,6 +327,8 @@ export async function actorRoutes(app: FastifyInstance) {
       }
 
       const actor = await tx.actor.findUniqueOrThrow({ where: { id: params.actorId } });
+      assertActorControl(principal, actor);
+
       if (actor.status !== 'ACTIVE') {
         throw Object.assign(new Error('Actor is not active.'), { statusCode: 409 });
       }
@@ -260,6 +339,16 @@ export async function actorRoutes(app: FastifyInstance) {
       });
       if (!currentExecution) {
         throw new Error('Actor has no active execution.');
+      }
+
+      if (
+        currentExecution.provider === input.provider &&
+        currentExecution.model === input.model &&
+        currentExecution.runtime === (input.runtime ?? null)
+      ) {
+        throw Object.assign(new Error('The actor is already using this execution configuration.'), {
+          statusCode: 409,
+        });
       }
 
       await tx.actorExecution.update({

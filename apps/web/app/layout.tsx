@@ -23,6 +23,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             <nav className="nav" aria-label="Primary navigation">
               <Link href="/">Actors</Link>
               <Link href="/matches">Matches</Link>
+              <Link href="/account">My actors</Link>
               <a href="https://github.com/Aravindh-dev12/onbae">GitHub</a>
             </nav>
           </header>
