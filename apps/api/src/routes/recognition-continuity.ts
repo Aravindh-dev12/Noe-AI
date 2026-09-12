@@ -56,7 +56,25 @@ export async function recognitionContinuityRoutes(app: FastifyInstance) {
   app.post('/v1/recognition-assessments', async (request, reply) => {
     assertAdmin(request);
     const input = assessmentSchema.parse(request.body);
-    const result = await recordContinuityRecognitionAssessment(input);
+    const result = await recordContinuityRecognitionAssessment({
+      actorId: input.actorId,
+      continuityTransitionId: input.continuityTransitionId ?? null,
+      ancestryId: input.ancestryId ?? null,
+      relation: input.relation,
+      disposition: input.disposition,
+      recognizerType: input.recognizerType,
+      recognizerRef: input.recognizerRef,
+      context: input.context,
+      policyFramework: input.policyFramework ?? null,
+      policyVersion: input.policyVersion,
+      sourceEvidenceArtifactId: input.sourceEvidenceArtifactId ?? null,
+      assessedAt: input.assessedAt ?? new Date(),
+      validUntil: input.validUntil ?? null,
+      conditions: input.conditions ?? [],
+      reasons: input.reasons ?? [],
+      idempotencyKey: input.idempotencyKey,
+      metadata: input.metadata ?? {},
+    });
     return reply.code(result.replayed ? 200 : 201).send(result);
   });
 
