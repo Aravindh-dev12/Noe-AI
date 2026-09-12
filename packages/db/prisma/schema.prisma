@@ -1,0 +1,239 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ActorType {
+  USER
+  PROVIDER
+  RESEARCH
+  ORGANIZATION
+}
+
+enum ActorStatus {
+  ACTIVE
+  PAUSED
+  RETIRED
+}
+
+enum LineageKind {
+  ORIGIN
+  MIGRATION
+  FORK
+  MERGE
+  RESTORE
+}
+
+enum CanonicalStatus {
+  ACCEPTED
+  DISPUTED
+  SUPERSEDED
+}
+
+enum EnvironmentStatus {
+  ACTIVE
+  DISABLED
+  ARCHIVED
+}
+
+enum MatchStatus {
+  SCHEDULED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  actors  Actor[]
+  follows Follow[]
+}
+
+model Actor {
+  id                 String      @id
+  handle             String      @unique
+  displayName        String
+  description        String?
+  avatarUrl          String?
+  ownerId            String?
+  actorType          ActorType
+  status             ActorStatus @default(ACTIVE)
+  canonicalLineageId String
+  createdAt          DateTime
+  updatedAt          DateTime    @updatedAt
+
+  owner         User?              @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  executions    ActorExecution[]
+  lineage       LineageNode[]
+  events        ActorEvent[]
+  followers     Follow[]
+  subjectEdges  RelationshipEdge[] @relation("relationship_subject")
+  objectEdges   RelationshipEdge[] @relation("relationship_object")
+  matchesA      Match[]            @relation("match_actor_a")
+  matchesB      Match[]            @relation("match_actor_b")
+  winnerMatches Match[]            @relation("match_winner")
+
+  @@index([ownerId])
+  @@index([actorType, status])
+  @@index([createdAt])
+}
+
+model ActorExecution {
+  id         String    @id
+  actorId    String
+  provider   String
+  model      String
+  runtime    String?
+  configHash String
+  startedAt  DateTime
+  endedAt    DateTime?
+  metadata   Json      @default("{}")
+
+  actor  Actor        @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  events ActorEvent[]
+
+  @@index([actorId, startedAt])
+  @@index([provider, model])
+}
+
+model LineageNode {
+  id           String      @id
+  actorId      String
+  parentNodeId String?
+  kind         LineageKind
+  canonical    Boolean     @default(false)
+  createdAt    DateTime
+  metadata     Json        @default("{}")
+
+  actor    Actor          @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  parent   LineageNode?   @relation("lineage_parent", fields: [parentNodeId], references: [id], onDelete: SetNull)
+  children LineageNode[]  @relation("lineage_parent")
+
+  @@index([actorId, canonical])
+  @@index([parentNodeId])
+}
+
+model Host {
+  id          String   @id
+  slug        String   @unique
+  displayName String
+  publicKey   String?
+  status      String   @default("active")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  environments Environment[]
+  events       ActorEvent[]
+}
+
+model Environment {
+  id          String            @id
+  hostId      String
+  slug        String
+  displayName String
+  version     String
+  status      EnvironmentStatus @default(ACTIVE)
+  config      Json              @default("{}")
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  host    Host         @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  matches Match[]
+
+  @@unique([hostId, slug, version])
+  @@index([slug, status])
+}
+
+model ActorEvent {
+  id                 String          @id
+  actorId            String
+  executionId        String?
+  hostId             String
+  type               String
+  occurredAt         DateTime
+  observedAt         DateTime
+  environmentVersion String
+  payload            Json
+  issuer             String
+  signature          String?
+  previousEventHash  String?
+  hash               String          @unique
+  canonicalStatus    CanonicalStatus @default(ACCEPTED)
+  createdAt          DateTime        @default(now())
+
+  actor     Actor          @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  execution ActorExecution? @relation(fields: [executionId], references: [id], onDelete: SetNull)
+  host      Host           @relation(fields: [hostId], references: [id], onDelete: Restrict)
+
+  @@index([actorId, occurredAt])
+  @@index([actorId, canonicalStatus, occurredAt])
+  @@index([type, occurredAt])
+  @@index([hostId, occurredAt])
+}
+
+model Follow {
+  userId    String
+  actorId   String
+  createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  actor Actor @relation(fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@id([userId, actorId])
+  @@index([actorId, createdAt])
+}
+
+model RelationshipEdge {
+  id              String   @id @default(cuid())
+  subjectActorId  String
+  objectActorId   String
+  relation        String
+  firstObservedAt DateTime
+  lastObservedAt  DateTime
+  eventCount      Int      @default(1)
+  metadata        Json     @default("{}")
+
+  subject Actor @relation("relationship_subject", fields: [subjectActorId], references: [id], onDelete: Cascade)
+  object  Actor @relation("relationship_object", fields: [objectActorId], references: [id], onDelete: Cascade)
+
+  @@unique([subjectActorId, objectActorId, relation])
+  @@index([subjectActorId, relation, lastObservedAt])
+  @@index([objectActorId, relation, lastObservedAt])
+}
+
+model Match {
+  id            String      @id
+  environmentId String
+  actorAId      String
+  actorBId      String
+  winnerActorId String?
+  status        MatchStatus @default(SCHEDULED)
+  scheduledAt   DateTime    @default(now())
+  startedAt     DateTime?
+  completedAt   DateTime?
+  seed          String?
+  result        Json?
+  trajectory    Json?
+  error         String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  environment Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
+  actorA      Actor       @relation("match_actor_a", fields: [actorAId], references: [id], onDelete: Restrict)
+  actorB      Actor       @relation("match_actor_b", fields: [actorBId], references: [id], onDelete: Restrict)
+  winner      Actor?      @relation("match_winner", fields: [winnerActorId], references: [id], onDelete: SetNull)
+
+  @@index([environmentId, status, scheduledAt])
+  @@index([actorAId, completedAt])
+  @@index([actorBId, completedAt])
+}
