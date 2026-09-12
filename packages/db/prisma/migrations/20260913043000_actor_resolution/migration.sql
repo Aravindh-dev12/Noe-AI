@@ -247,3 +247,90 @@ CREATE TRIGGER "ActorResolutionItem_latest_decision_guard"
 BEFORE INSERT OR UPDATE OF "latestDecisionId"
 ON "ActorResolutionItem"
 FOR EACH ROW EXECUTE FUNCTION noeone_validate_resolution_latest_decision();
+
+-- Once a case reaches a terminal state, no new resolution work or decisions
+-- may be attached. This closes the race where a case could be marked resolved
+-- and then receive a late unresolved item.
+CREATE OR REPLACE FUNCTION noeone_guard_resolution_item_case_state()
+RETURNS trigger AS $$
+DECLARE
+  case_status TEXT;
+BEGIN
+  SELECT "status" INTO case_status FROM "ActorResolutionCase" WHERE "id" = NEW."caseId" FOR SHARE;
+  IF case_status IS NULL THEN
+    RAISE EXCEPTION 'actor resolution case does not exist';
+  END IF;
+  IF case_status IN ('RESOLVED', 'SUPERSEDED', 'ABANDONED') THEN
+    RAISE EXCEPTION 'cannot mutate resolution inventory for terminal case %', case_status;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "ActorResolutionItem_case_state_guard"
+BEFORE INSERT OR UPDATE OF "caseId", "status", "latestDecisionId"
+ON "ActorResolutionItem"
+FOR EACH ROW EXECUTE FUNCTION noeone_guard_resolution_item_case_state();
+
+CREATE OR REPLACE FUNCTION noeone_guard_resolution_decision_case_state()
+RETURNS trigger AS $$
+DECLARE
+  case_status TEXT;
+BEGIN
+  SELECT c."status" INTO case_status
+  FROM "ActorResolutionCase" c
+  JOIN "ActorResolutionItem" i ON i."caseId" = c."id"
+  WHERE i."id" = NEW."itemId"
+  FOR SHARE OF c;
+
+  IF case_status IS NULL THEN
+    RAISE EXCEPTION 'resolution item/case does not exist';
+  END IF;
+  IF case_status IN ('RESOLVED', 'SUPERSEDED', 'ABANDONED') THEN
+    RAISE EXCEPTION 'cannot append decision to terminal resolution case %', case_status;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "ActorResolutionDecision_case_state_guard"
+BEFORE INSERT
+ON "ActorResolutionItemDecision"
+FOR EACH ROW EXECUTE FUNCTION noeone_guard_resolution_decision_case_state();
+
+-- Validate the transition log against the current projection. The opening
+-- transition is the only transition allowed from NULL; later transitions must
+-- start from the case's current status.
+CREATE OR REPLACE FUNCTION noeone_validate_resolution_transition()
+RETURNS trigger AS $$
+DECLARE
+  current_status TEXT;
+BEGIN
+  SELECT "status" INTO current_status
+  FROM "ActorResolutionCase"
+  WHERE "id" = NEW."caseId"
+  FOR UPDATE;
+
+  IF current_status IS NULL THEN
+    RAISE EXCEPTION 'actor resolution case does not exist';
+  END IF;
+
+  IF NEW."fromStatus" IS NULL THEN
+    IF NEW."toStatus" <> 'OPEN' OR current_status <> 'OPEN' THEN
+      RAISE EXCEPTION 'invalid actor resolution opening transition';
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  IF current_status <> NEW."fromStatus" THEN
+    RAISE EXCEPTION 'resolution transition source status mismatch: expected %, got %', current_status, NEW."fromStatus";
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "ActorResolutionTransition_projection_guard"
+BEFORE INSERT
+ON "ActorResolutionTransition"
+FOR EACH ROW EXECUTE FUNCTION noeone_validate_resolution_transition();
