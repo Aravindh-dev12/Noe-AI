@@ -4,19 +4,21 @@
   "private": true,
   "packageManager": "pnpm@10.15.1",
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.0.0 <23.0.0"
   },
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
+    "build:packages": "turbo build --filter='./packages/*'",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
-    "lint": "eslint .",
+    "lint": "pnpm build:packages && eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "db:generate": "pnpm --filter @onbae/db generate",
     "db:push": "pnpm --filter @onbae/db push",
     "db:migrate": "pnpm --filter @onbae/db migrate",
+    "db:migrate:status": "pnpm --filter @onbae/db migrate:status",
     "db:seed": "pnpm --filter @onbae/db seed"
   },
   "devDependencies": {
@@ -28,5 +30,12 @@
     "turbo": "^2.5.6",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.41.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/engines",
+      "esbuild",
+      "msgpackr-extract"
+    ]
   }
 }

@@ -1,11 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { createActor, normalizeHandle } from '@onbae/actor-core';
-import { db, type Prisma } from '@onbae/db';
+import { appendCanonicalActorEvent, db, type Prisma } from '@onbae/db';
 import { z } from 'zod';
 
+import { env } from '../env.js';
 import { assertAdmin } from '../lib/auth.js';
-import { appendCanonicalEvent } from '../lib/events.js';
 
 const createActorSchema = z.object({
   handle: z.string().min(3).max(32),
@@ -30,7 +30,11 @@ const paginationSchema = z.object({
   cursor: z.string().optional(),
 });
 
-function executionConfigHash(input: { provider: string; model: string; runtime?: string }) {
+function executionConfigHash(input: {
+  provider: string;
+  model: string;
+  runtime: string | undefined;
+}) {
   return `sha256:${createHash('sha256')
     .update(JSON.stringify({ provider: input.provider, model: input.model, runtime: input.runtime ?? null }))
     .digest('hex')}`;
@@ -137,7 +141,11 @@ export async function actorRoutes(app: FastifyInstance) {
   app.post('/v1/actors', async (request, reply) => {
     assertAdmin(request);
     const input = createActorSchema.parse(request.body);
-    const configHash = executionConfigHash(input);
+    const configHash = executionConfigHash({
+      provider: input.provider,
+      model: input.model,
+      runtime: input.runtime,
+    });
     const aggregate = createActor({
       handle: input.handle,
       displayName: input.displayName,
@@ -156,7 +164,7 @@ export async function actorRoutes(app: FastifyInstance) {
             id: aggregate.actor.id,
             handle: aggregate.actor.handle,
             displayName: aggregate.actor.displayName,
-            description: input.description,
+            description: input.description ?? null,
             ownerId: aggregate.actor.ownerId,
             actorType: actorTypeToDb(aggregate.actor.actorType),
             status: 'ACTIVE',
@@ -190,20 +198,25 @@ export async function actorRoutes(app: FastifyInstance) {
           },
         });
 
-        await appendCanonicalEvent(tx, {
-          actorId: created.id,
-          executionId: aggregate.execution.id,
-          type: 'actor.created',
-          hostId: 'host_onbae',
-          environmentVersion: 'onbae-core@1.0.0',
-          issuer: 'onbae',
-          payload: {
-            handle: created.handle,
-            actorType: created.actorType.toLowerCase(),
-            provider: aggregate.execution.provider,
-            model: aggregate.execution.model,
+        await appendCanonicalActorEvent(
+          tx,
+          {
+            actorId: created.id,
+            executionId: aggregate.execution.id,
+            type: 'actor.created',
+            sourceKey: `actor:${created.id}:created`,
+            hostId: 'host_onbae',
+            environmentVersion: 'onbae-core@1.0.0',
+            issuer: 'onbae',
+            payload: {
+              handle: created.handle,
+              actorType: created.actorType.toLowerCase(),
+              provider: aggregate.execution.provider,
+              model: aggregate.execution.model,
+            },
           },
-        });
+          env.EVENT_SIGNING_SECRET,
+        );
 
         return created;
       });
@@ -222,13 +235,21 @@ export async function actorRoutes(app: FastifyInstance) {
     const now = new Date();
     const nextExecutionId = `exec_${randomUUID()}`;
     const nextLineageId = `lin_${randomUUID()}`;
-    const configHash = executionConfigHash(input);
+    const configHash = executionConfigHash({
+      provider: input.provider,
+      model: input.model,
+      runtime: input.runtime,
+    });
 
     const result = await db.$transaction(async (tx) => {
-      const actor = await tx.actor.findUnique({ where: { id: params.actorId } });
-      if (!actor) {
+      const lockedActors = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "Actor" WHERE "id" = ${params.actorId} FOR UPDATE
+      `;
+      if (lockedActors.length !== 1) {
         throw Object.assign(new Error('Actor not found.'), { statusCode: 404 });
       }
+
+      const actor = await tx.actor.findUniqueOrThrow({ where: { id: params.actorId } });
       if (actor.status !== 'ACTIVE') {
         throw Object.assign(new Error('Actor is not active.'), { statusCode: 409 });
       }
@@ -284,28 +305,33 @@ export async function actorRoutes(app: FastifyInstance) {
         data: { canonicalLineageId: nextLineageId },
       });
 
-      await appendCanonicalEvent(tx, {
-        actorId: actor.id,
-        executionId: nextExecutionId,
-        type: 'actor.execution.migrated',
-        occurredAt: now,
-        hostId: 'host_onbae',
-        environmentVersion: 'onbae-core@1.0.0',
-        issuer: 'onbae',
-        payload: {
-          from: {
-            provider: currentExecution.provider,
-            model: currentExecution.model,
-            executionId: currentExecution.id,
+      await appendCanonicalActorEvent(
+        tx,
+        {
+          actorId: actor.id,
+          executionId: nextExecutionId,
+          type: 'actor.execution.migrated',
+          sourceKey: `lineage:${nextLineageId}:migration`,
+          occurredAt: now,
+          hostId: 'host_onbae',
+          environmentVersion: 'onbae-core@1.0.0',
+          issuer: 'onbae',
+          payload: {
+            from: {
+              provider: currentExecution.provider,
+              model: currentExecution.model,
+              executionId: currentExecution.id,
+            },
+            to: {
+              provider: input.provider,
+              model: input.model,
+              executionId: nextExecutionId,
+            },
+            reason: input.reason ?? null,
           },
-          to: {
-            provider: input.provider,
-            model: input.model,
-            executionId: nextExecutionId,
-          },
-          reason: input.reason ?? null,
         },
-      });
+        env.EVENT_SIGNING_SECRET,
+      );
 
       return {
         actorId: actor.id,

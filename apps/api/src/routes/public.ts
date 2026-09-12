@@ -2,10 +2,32 @@ import type { FastifyInstance } from 'fastify';
 import { db } from '@onbae/db';
 import { z } from 'zod';
 
+import { redis } from '../lib/queue.js';
+
 export async function publicRoutes(app: FastifyInstance) {
-  app.get('/health', async () => {
-    await db.$queryRaw`SELECT 1`;
-    return { status: 'ok' };
+  app.get('/health/live', async () => ({ status: 'ok' }));
+
+  const readiness = async () => {
+    await Promise.all([db.$queryRaw`SELECT 1`, redis.ping()]);
+    return { status: 'ok', dependencies: { postgres: 'ok', redis: 'ok' } };
+  };
+
+  app.get('/health', async (_request, reply) => {
+    try {
+      return await readiness();
+    } catch (error) {
+      app.log.error({ err: error }, 'readiness check failed');
+      return reply.code(503).send({ status: 'unavailable' });
+    }
+  });
+
+  app.get('/health/ready', async (_request, reply) => {
+    try {
+      return await readiness();
+    } catch (error) {
+      app.log.error({ err: error }, 'readiness check failed');
+      return reply.code(503).send({ status: 'unavailable' });
+    }
   });
 
   app.get('/v1/feed', async (request) => {

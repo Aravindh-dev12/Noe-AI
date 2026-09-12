@@ -115,9 +115,9 @@ model LineageNode {
   createdAt    DateTime
   metadata     Json        @default("{}")
 
-  actor    Actor          @relation(fields: [actorId], references: [id], onDelete: Cascade)
-  parent   LineageNode?   @relation("lineage_parent", fields: [parentNodeId], references: [id], onDelete: SetNull)
-  children LineageNode[]  @relation("lineage_parent")
+  actor    Actor         @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  parent   LineageNode?  @relation("lineage_parent", fields: [parentNodeId], references: [id], onDelete: SetNull)
+  children LineageNode[] @relation("lineage_parent")
 
   @@index([actorId, canonical])
   @@index([parentNodeId])
@@ -147,7 +147,7 @@ model Environment {
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
 
-  host    Host         @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  host    Host    @relation(fields: [hostId], references: [id], onDelete: Cascade)
   matches Match[]
 
   @@unique([hostId, slug, version])
@@ -160,20 +160,21 @@ model ActorEvent {
   executionId        String?
   hostId             String
   type               String
+  sourceKey          String?         @unique
   occurredAt         DateTime
   observedAt         DateTime
   environmentVersion String
   payload            Json
   issuer             String
   signature          String?
-  previousEventHash  String?
+  previousEventHash  String?         @unique
   hash               String          @unique
   canonicalStatus    CanonicalStatus @default(ACCEPTED)
   createdAt          DateTime        @default(now())
 
-  actor     Actor          @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  actor     Actor           @relation(fields: [actorId], references: [id], onDelete: Cascade)
   execution ActorExecution? @relation(fields: [executionId], references: [id], onDelete: SetNull)
-  host      Host           @relation(fields: [hostId], references: [id], onDelete: Restrict)
+  host      Host            @relation(fields: [hostId], references: [id], onDelete: Restrict)
 
   @@index([actorId, occurredAt])
   @@index([actorId, canonicalStatus, occurredAt])

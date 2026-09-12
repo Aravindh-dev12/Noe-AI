@@ -5,9 +5,13 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:17-alpine
@@ -33,34 +37,145 @@ jobs:
           --health-retries=10
 
     env:
+      NODE_ENV: test
       DATABASE_URL: postgresql://onbae:onbae@localhost:5432/onbae?schema=public
       REDIS_URL: redis://localhost:6379
+      ADMIN_API_KEY: ci-only-admin-key-with-more-than-32-characters
       EVENT_SIGNING_SECRET: ci-only-event-secret-with-more-than-32-characters
+      CORS_ORIGINS: http://localhost:3000
+      TRUST_PROXY: "false"
       ONBAE_API_URL: http://localhost:4000
       NEXT_PUBLIC_API_URL: http://localhost:4000
+      API_PORT: 4000
+      WORKER_CONCURRENCY: 2
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: pnpm/action-setup@v4
         with:
           version: 10.15.1
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: pnpm install --frozen-lockfile=false
-      - run: pnpm db:generate
-      - run: pnpm db:push
+          cache: pnpm
+      - name: Install frozen dependency graph
+        run: pnpm install --frozen-lockfile
+      - name: Generate Prisma client
+        run: pnpm db:generate
+      - name: Apply committed database migrations
+        run: pnpm db:migrate
+      - name: Verify migration state
+        run: pnpm db:migrate:status
+      - name: Lint
+        run: pnpm lint
       - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
+      - name: Production build
+        run: pnpm build
+      - name: Runtime smoke test
         shell: bash
         run: |
-          set -o pipefail
-          pnpm typecheck 2>&1 | tee typecheck.log
-      - name: Upload typecheck diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: typecheck-diagnostics
-          path: typecheck.log
-          if-no-files-found: ignore
-      - run: pnpm test
-      - run: pnpm build
+          set -euo pipefail
+
+          api_log=/tmp/onbae-api.log
+          worker_log=/tmp/onbae-worker.log
+          web_log=/tmp/onbae-web.log
+          api_pid=""
+          worker_pid=""
+          web_pid=""
+
+          cleanup() {
+            for pid in "${web_pid:-}" "${worker_pid:-}" "${api_pid:-}"; do
+              if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                kill -TERM "$pid" 2>/dev/null || true
+              fi
+            done
+            for pid in "${web_pid:-}" "${worker_pid:-}" "${api_pid:-}"; do
+              if [ -n "$pid" ]; then
+                wait "$pid" 2>/dev/null || true
+              fi
+            done
+          }
+
+          diagnostics() {
+            echo "--- API log ---"
+            cat "$api_log" 2>/dev/null || true
+            echo "--- Worker log ---"
+            cat "$worker_log" 2>/dev/null || true
+            echo "--- Web log ---"
+            cat "$web_log" 2>/dev/null || true
+          }
+
+          on_exit() {
+            status=$?
+            if [ "$status" -ne 0 ]; then
+              diagnostics
+            fi
+            cleanup
+            exit "$status"
+          }
+          trap on_exit EXIT
+
+          wait_for_url() {
+            url=$1
+            for _ in $(seq 1 40); do
+              if curl --fail --silent --show-error "$url" >/dev/null 2>&1; then
+                return 0
+              fi
+              sleep 1
+            done
+            echo "Timed out waiting for $url" >&2
+            return 1
+          }
+
+          pnpm db:seed
+
+          NODE_ENV=production pnpm --filter @onbae/api start >"$api_log" 2>&1 &
+          api_pid=$!
+          NODE_ENV=production pnpm --filter @onbae/worker start >"$worker_log" 2>&1 &
+          worker_pid=$!
+
+          wait_for_url http://127.0.0.1:4000/health/ready
+          curl --fail --silent --show-error http://127.0.0.1:4000/health/live >/dev/null
+          kill -0 "$worker_pid"
+
+          match_json=$(curl --fail --silent --show-error \
+            -X POST http://127.0.0.1:4000/v1/matches \
+            -H 'content-type: application/json' \
+            -H "x-onbae-admin-key: ${ADMIN_API_KEY}" \
+            --data '{"actorAId":"act_nova","actorBId":"act_echo","environmentId":"env_triad_v1"}')
+          match_id=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"$match_json")
+
+          match_status=""
+          for _ in $(seq 1 40); do
+            match_json=$(curl --fail --silent --show-error "http://127.0.0.1:4000/v1/matches/${match_id}")
+            match_status=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])' <<<"$match_json")
+            if [ "$match_status" = "COMPLETED" ]; then
+              break
+            fi
+            if [ "$match_status" = "FAILED" ] || [ "$match_status" = "CANCELLED" ]; then
+              echo "Smoke match ended with status $match_status" >&2
+              echo "$match_json" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+
+          if [ "$match_status" != "COMPLETED" ]; then
+            echo "Smoke match did not complete in time" >&2
+            exit 1
+          fi
+
+          nova_json=$(curl --fail --silent --show-error http://127.0.0.1:4000/v1/actors/nova)
+          python3 -c 'import json,sys; data=json.load(sys.stdin); assert any(e["type"] == "competition.result" for e in data["events"])' <<<"$nova_json"
+
+          NODE_ENV=production pnpm --filter @onbae/web start >"$web_log" 2>&1 &
+          web_pid=$!
+          wait_for_url http://127.0.0.1:3000/
+          curl --fail --silent --show-error http://127.0.0.1:3000/matches >/dev/null
+
+          echo "Onbae API, worker, canonical event flow, and web smoke tests passed."
