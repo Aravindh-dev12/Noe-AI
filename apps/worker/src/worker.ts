@@ -281,14 +281,22 @@ async function executeMatch(job: Job) {
 
     return { matchId, result, committed };
   } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message.slice(0, 4_000) : 'unknown worker error';
+    const maxAttempts = Math.max(job.opts.attempts ?? 1, 1);
+    // BullMQ increments attemptsStarted whenever the job becomes active. Inside the
+    // processor catch block, it therefore tells us whether another configured attempt
+    // remains, while attemptsMade is only incremented after we rethrow.
+    const willRetry = job.attemptsStarted < maxAttempts;
+
     await db.match.updateMany({
       where: {
         id: match.id,
         status: { notIn: ['COMPLETED', 'CANCELLED'] },
       },
       data: {
-        status: 'FAILED',
-        error: error instanceof Error ? error.message.slice(0, 4_000) : 'unknown worker error',
+        status: willRetry ? 'RETRYING' : 'FAILED',
+        error: errorMessage,
       },
     });
     throw error;
@@ -309,8 +317,11 @@ worker.on('failed', (job, error) => {
   console.error(
     JSON.stringify({
       level: 'error',
-      message: 'match failed',
+      message: 'match attempt failed',
       jobId: job?.id ?? null,
+      attemptsMade: job?.attemptsMade ?? null,
+      attemptsStarted: job?.attemptsStarted ?? null,
+      maxAttempts: job?.opts.attempts ?? 1,
       error: error.message,
     }),
   );
