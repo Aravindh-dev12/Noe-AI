@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AnthropicProvider, MockProvider, OpenAIProvider } from './index.js';
@@ -10,6 +11,8 @@ const input = {
   allowedActions: [{ id: 'stone' }, { id: 'wave' }, { id: 'spark' }],
 };
 
+const actionOutputSchema = z.object({ action: z.string() });
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -19,9 +22,10 @@ describe('MockProvider', () => {
     const provider = new MockProvider();
     const first = await provider.run(input);
     const second = await provider.run(input);
+    const parsed = actionOutputSchema.parse(JSON.parse(first.rawText) as unknown);
 
     expect(first.rawText).toBe(second.rawText);
-    expect(['stone', 'wave', 'spark']).toContain(JSON.parse(first.rawText).action);
+    expect(['stone', 'wave', 'spark']).toContain(parsed.action);
   });
 });
 
