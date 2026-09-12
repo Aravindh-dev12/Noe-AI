@@ -100,7 +100,7 @@ export type ActorVerification = {
     invalid: number;
     missing: number;
   };
-  externalHostVerification: 'not_yet_supported' | string;
+  externalHostVerification: string;
   reason: string | null;
 };
 
