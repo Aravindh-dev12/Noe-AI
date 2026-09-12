@@ -98,6 +98,13 @@ type IntentArtifactNode = {
   outputDigest: string;
 };
 
+type AuthorityIntentGrant = {
+  id: string;
+  subjectActorId: string;
+  parentGrantId: string | null;
+  sourceEvidenceArtifactId: string | null;
+};
+
 function sha256(value: unknown): string {
   return `sha256:${createHash('sha256').update(canonicalJson(value)).digest('hex')}`;
 }
@@ -191,6 +198,86 @@ function assessmentEnvelope(
   };
 }
 
+async function validateProcessorExecution(
+  input: RegisterIntentTransformInput,
+  transformedAt: Date,
+): Promise<void> {
+  if (!input.executionId) return;
+
+  const execution = await db.actorExecution.findUnique({
+    where: { id: input.executionId },
+    select: { actorId: true, startedAt: true, endedAt: true },
+  });
+  if (!execution) {
+    throw Object.assign(new Error('Intent transform processor execution not found.'), {
+      statusCode: 404,
+    });
+  }
+  if (input.processorType === 'actor' && execution.actorId !== input.processorRef) {
+    throw new InstitutionalConflictError(
+      'Intent transform execution does not belong to the declared processor actor.',
+    );
+  }
+  if (execution.startedAt.getTime() > transformedAt.getTime()) {
+    throw new InstitutionalConflictError('Intent transform execution had not started yet.');
+  }
+  if (execution.endedAt && execution.endedAt.getTime() <= transformedAt.getTime()) {
+    throw new InstitutionalConflictError('Intent transform execution had already ended.');
+  }
+}
+
+async function assertSupportingEvidenceExists(evidenceArtifactIds: string[]): Promise<void> {
+  const uniqueIds = [...new Set(evidenceArtifactIds)];
+  if (uniqueIds.length === 0) return;
+  const rows = await db.evidenceArtifact.findMany({
+    where: { id: { in: uniqueIds } },
+    select: { id: true },
+  });
+  if (rows.length !== uniqueIds.length) {
+    const found = new Set(rows.map((row) => row.id));
+    const missing = uniqueIds.filter((id) => !found.has(id));
+    throw new InstitutionalConflictError(
+      `Intent assessment references missing evidence: ${missing.join(', ')}.`,
+    );
+  }
+}
+
+async function assertMandateAncestor(
+  mandateArtifactId: string,
+  terminalArtifactId: string,
+): Promise<void> {
+  let cursor: string | null = terminalArtifactId;
+  const seen = new Set<string>();
+
+  while (cursor) {
+    if (seen.has(cursor)) {
+      throw new InstitutionalConflictError('Intent artifact ancestry contains a cycle.');
+    }
+    if (seen.size >= 32) {
+      throw new InstitutionalConflictError('Intent artifact ancestry exceeds maximum depth of 32.');
+    }
+    seen.add(cursor);
+    if (cursor === mandateArtifactId) return;
+
+    const artifact = await db.evidenceArtifact.findUnique({
+      where: { id: cursor },
+      select: { kind: true, metadata: true },
+    });
+    if (!artifact) {
+      throw Object.assign(new Error('Intent artifact ancestry contains a missing artifact.'), {
+        statusCode: 404,
+      });
+    }
+    if (artifact.kind !== INTENT_TRANSFORM_KIND) break;
+    const metadata = asObject(artifact.metadata);
+    cursor = requiredString(metadata.parentArtifactId, 'parentArtifactId');
+  }
+
+  throw new InstitutionalConflictError(
+    'Terminal intent artifact does not descend from the declared mandate artifact.',
+  );
+}
+
 export async function registerIntentMandate(
   input: RegisterIntentMandateInput,
   registry: RegistryContext,
@@ -248,6 +335,7 @@ export async function registerIntentTransform(
   }
 
   const transformedAt = input.transformedAt ?? new Date();
+  await validateProcessorExecution(input, transformedAt);
   const envelope = transformEnvelope(input, transformedAt);
   const digest = sha256(envelope);
 
@@ -278,8 +366,14 @@ export async function registerIntentAssessment(
   registry: RegistryContext,
 ) {
   const [mandate, terminal, exercise] = await Promise.all([
-    db.evidenceArtifact.findUnique({ where: { id: input.mandateArtifactId }, select: { id: true, kind: true } }),
-    db.evidenceArtifact.findUnique({ where: { id: input.terminalArtifactId }, select: { id: true, kind: true } }),
+    db.evidenceArtifact.findUnique({
+      where: { id: input.mandateArtifactId },
+      select: { id: true, kind: true },
+    }),
+    db.evidenceArtifact.findUnique({
+      where: { id: input.terminalArtifactId },
+      select: { id: true, kind: true },
+    }),
     db.authorityExercise.findUnique({
       where: { id: input.authorityExerciseId },
       select: { id: true, actorId: true },
@@ -289,7 +383,10 @@ export async function registerIntentAssessment(
   if (!mandate || mandate.kind !== INTENT_MANDATE_KIND) {
     throw new InstitutionalConflictError('mandateArtifactId must reference an intent mandate.');
   }
-  if (!terminal || (terminal.kind !== INTENT_MANDATE_KIND && terminal.kind !== INTENT_TRANSFORM_KIND)) {
+  if (
+    !terminal ||
+    (terminal.kind !== INTENT_MANDATE_KIND && terminal.kind !== INTENT_TRANSFORM_KIND)
+  ) {
     throw new InstitutionalConflictError(
       'terminalArtifactId must reference an intent mandate or transform.',
     );
@@ -302,6 +399,25 @@ export async function registerIntentAssessment(
       'Intent assessment actor does not match the authority exercise actor.',
     );
   }
+
+  const terminalBinding = await db.actorEvidenceBinding.findFirst({
+    where: {
+      actorId: input.actorId,
+      evidenceArtifactId: input.terminalArtifactId,
+      role: { in: ['intent_mandate', 'intent_transform'] },
+    },
+    select: { id: true },
+  });
+  if (!terminalBinding) {
+    throw new InstitutionalConflictError(
+      'Terminal intent artifact is not bound to the assessed authority-exercise actor.',
+    );
+  }
+
+  await Promise.all([
+    assertMandateAncestor(input.mandateArtifactId, input.terminalArtifactId),
+    assertSupportingEvidenceExists(input.evidenceArtifactIds ?? []),
+  ]);
 
   const assessedAt = input.assessedAt ?? new Date();
   const envelope = assessmentEnvelope(input, assessedAt);
@@ -379,12 +495,7 @@ async function loadIntentNode(artifactId: string): Promise<IntentArtifactNode> {
 
 export async function verifyAuthorityIntentChain(grantId: string): Promise<IntentChainVerification> {
   const issues: string[] = [];
-  const grants: Array<{
-    id: string;
-    subjectActorId: string;
-    parentGrantId: string | null;
-    sourceEvidenceArtifactId: string | null;
-  }> = [];
+  const grants: AuthorityIntentGrant[] = [];
   const seenGrantIds = new Set<string>();
   let grantCursor: string | null = grantId;
 
@@ -398,7 +509,7 @@ export async function verifyAuthorityIntentChain(grantId: string): Promise<Inten
       break;
     }
     seenGrantIds.add(grantCursor);
-    const grant = await db.authorityGrant.findUnique({
+    const grant: AuthorityIntentGrant | null = await db.authorityGrant.findUnique({
       where: { id: grantCursor },
       select: {
         id: true,
