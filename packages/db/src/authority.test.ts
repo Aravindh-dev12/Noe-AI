@@ -12,9 +12,8 @@ function grant(
   overrides: Partial<AuthorityGrant> & Pick<AuthorityGrant, 'id' | 'subjectActorId'>,
 ): AuthorityGrant {
   const now = new Date('2026-09-12T00:00:00.000Z');
+  const { id, subjectActorId, ...rest } = overrides;
   return {
-    id: overrides.id,
-    subjectActorId: overrides.subjectActorId,
     parentGrantId: null,
     grantorType: 'user',
     grantorRef: 'usr_test',
@@ -32,7 +31,7 @@ function grant(
     sourceEvidenceArtifactId: null,
     issuedByType: 'admin',
     issuedById: null,
-    idempotencyKey: `idem_${overrides.id}`,
+    idempotencyKey: `idem_${id}`,
     revokedAt: null,
     revokedByType: null,
     revokedById: null,
@@ -40,7 +39,9 @@ function grant(
     metadata: {},
     createdAt: now,
     updatedAt: now,
-    ...overrides,
+    ...rest,
+    id,
+    subjectActorId,
   };
 }
 
