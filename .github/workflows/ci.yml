@@ -33,9 +33,13 @@ jobs:
           --health-retries=10
 
     env:
+      NODE_ENV: test
       DATABASE_URL: postgresql://onbae:onbae@localhost:5432/onbae?schema=public
       REDIS_URL: redis://localhost:6379
+      ADMIN_API_KEY: ci-only-admin-key-with-more-than-32-characters
       EVENT_SIGNING_SECRET: ci-only-event-secret-with-more-than-32-characters
+      CORS_ORIGINS: http://localhost:3000
+      TRUST_PROXY: "false"
       ONBAE_API_URL: http://localhost:4000
       NEXT_PUBLIC_API_URL: http://localhost:4000
 
@@ -48,6 +52,21 @@ jobs:
         with:
           node-version: 22
       - run: pnpm install --frozen-lockfile=false
+      - name: Generate reproducibility artifacts
+        shell: bash
+        run: |
+          mkdir -p build-artifacts
+          cp pnpm-lock.yaml build-artifacts/pnpm-lock.yaml
+          pnpm --filter @onbae/db exec prisma migrate diff \
+            --from-empty \
+            --to-schema prisma/schema.prisma \
+            --script > build-artifacts/000000000000_init.sql
+      - name: Upload reproducibility artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: reproducibility-artifacts
+          path: build-artifacts
+          if-no-files-found: error
       - run: pnpm db:generate
       - run: pnpm db:push
       - name: Typecheck
