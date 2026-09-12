@@ -87,6 +87,58 @@ function disposition(value: 'aligned' | 'not_aligned' | 'indeterminate' | 'dispu
   return value.toUpperCase() as IntentAssessmentDisposition;
 }
 
+function metadataObject(metadata: Prisma.JsonValue): Record<string, Prisma.JsonValue> {
+  return typeof metadata === 'object' && metadata !== null && !Array.isArray(metadata)
+    ? (metadata as Record<string, Prisma.JsonValue>)
+    : {};
+}
+
+function publicIntentMetadata(kind: string, metadata: Prisma.JsonValue) {
+  const value = metadataObject(metadata);
+  if (kind === 'noeone.intent.mandate.v1') {
+    return {
+      version: value.version ?? null,
+      framework: value.framework ?? null,
+      principalType: value.principalType ?? null,
+      intentDigest: value.intentDigest ?? null,
+      digestAlgorithm: value.digestAlgorithm ?? null,
+      issuedAt: value.issuedAt ?? null,
+      expiresAt: value.expiresAt ?? null,
+      purposeClass: value.purposeClass ?? null,
+      contextDigest: value.contextDigest ?? null,
+    };
+  }
+  if (kind === 'noeone.intent.transform.v1') {
+    return {
+      version: value.version ?? null,
+      framework: value.framework ?? null,
+      parentArtifactId: value.parentArtifactId ?? null,
+      inputDigest: value.inputDigest ?? null,
+      outputDigest: value.outputDigest ?? null,
+      processorType: value.processorType ?? null,
+      deterministic: value.deterministic ?? null,
+      ruleId: value.ruleId ?? null,
+      transformedAt: value.transformedAt ?? null,
+    };
+  }
+  if (kind === 'noeone.intent.assessment.v1') {
+    return {
+      version: value.version ?? null,
+      mandateArtifactId: value.mandateArtifactId ?? null,
+      terminalArtifactId: value.terminalArtifactId ?? null,
+      authorityExerciseId: value.authorityExerciseId ?? null,
+      disposition: value.disposition ?? null,
+      evaluator: value.evaluator ?? null,
+      method: value.method ?? null,
+      methodVersion: value.methodVersion ?? null,
+      basisDigest: value.basisDigest ?? null,
+      confidenceBps: value.confidenceBps ?? null,
+      assessedAt: value.assessedAt ?? null,
+    };
+  }
+  return {};
+}
+
 export async function intentContinuityRoutes(app: FastifyInstance) {
   app.post('/v1/intent/mandates', async (request, reply) => {
     assertAdmin(request);
@@ -214,9 +266,7 @@ export async function intentContinuityRoutes(app: FastifyInstance) {
       _count: { _all: true },
     });
 
-    const roleCounts = Object.fromEntries(
-      counts.map((row) => [row.role, row._count._all]),
-    );
+    const roleCounts = Object.fromEntries(counts.map((row) => [row.role, row._count._all]));
 
     return {
       version: 'noeone.intent.public.v1',
@@ -226,7 +276,20 @@ export async function intentContinuityRoutes(app: FastifyInstance) {
         transformCount: roleCounts.intent_transform ?? 0,
         assessmentCount: roleCounts.intent_assessment ?? 0,
       },
-      data: bindings,
+      data: bindings.map((binding) => ({
+        id: binding.id,
+        role: binding.role,
+        boundAt: binding.boundAt,
+        artifact: {
+          id: binding.artifact.id,
+          kind: binding.artifact.kind,
+          issuer: binding.artifact.issuer,
+          digest: binding.artifact.digest,
+          digestAlgorithm: binding.artifact.digestAlgorithm,
+          observedAt: binding.artifact.observedAt,
+          metadata: publicIntentMetadata(binding.artifact.kind, binding.artifact.metadata),
+        },
+      })),
     };
   });
 }
