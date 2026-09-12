@@ -19,18 +19,18 @@
     "push": "prisma db push",
     "migrate": "prisma migrate deploy",
     "migrate:dev": "prisma migrate dev",
+    "migrate:status": "prisma migrate status",
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@onbae/event-model": "workspace:*",
     "@prisma/client": "^6.15.0"
   },
   "devDependencies": {
+    "dotenv": "^17.2.2",
     "prisma": "^6.15.0",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
-  },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
   }
 }
