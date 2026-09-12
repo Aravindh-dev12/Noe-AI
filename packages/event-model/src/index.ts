@@ -50,9 +50,19 @@ export function canonicalJson(value: unknown): string {
   return JSON.stringify(canonicalize(value));
 }
 
+function hashingView(event: UnsignedActorEvent): UnsignedActorEvent {
+  const { signature: _signature, ...provenance } = event.provenance;
+  return {
+    ...event,
+    provenance,
+  };
+}
+
 export function hashUnsignedEvent(event: UnsignedActorEvent): string {
   const parsed = unsignedActorEventSchema.parse(event);
-  const digest = createHash('sha256').update(canonicalJson(parsed)).digest('hex');
+  const digest = createHash('sha256')
+    .update(canonicalJson(hashingView(parsed)))
+    .digest('hex');
   return `sha256:${digest}`;
 }
 
