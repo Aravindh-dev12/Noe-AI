@@ -60,6 +60,17 @@ const anthropicResponseSchema = z.object({
     .optional(),
 });
 
+function buildUsage(inputTokens?: number, outputTokens?: number): ProviderRunResult['usage'] {
+  if (inputTokens === undefined && outputTokens === undefined) {
+    return undefined;
+  }
+
+  return {
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+  };
+}
+
 function buildUserPrompt(input: ProviderRunInput): string {
   return [
     'Observation:',
@@ -126,10 +137,9 @@ export class OpenAIProvider implements ModelProvider {
 
     return {
       rawText: parsed.output_text,
-      usage: {
-        inputTokens: parsed.usage?.input_tokens,
-        outputTokens: parsed.usage?.output_tokens,
-      },
+      ...(buildUsage(parsed.usage?.input_tokens, parsed.usage?.output_tokens)
+        ? { usage: buildUsage(parsed.usage?.input_tokens, parsed.usage?.output_tokens) }
+        : {}),
       providerMetadata: parsed.id ? { responseId: parsed.id } : {},
     };
   }
@@ -179,12 +189,10 @@ export class AnthropicProvider implements ModelProvider {
       throw new Error('Anthropic response did not contain text content.');
     }
 
+    const usage = buildUsage(parsed.usage?.input_tokens, parsed.usage?.output_tokens);
     return {
       rawText,
-      usage: {
-        inputTokens: parsed.usage?.input_tokens,
-        outputTokens: parsed.usage?.output_tokens,
-      },
+      ...(usage ? { usage } : {}),
       providerMetadata: parsed.id ? { responseId: parsed.id } : {},
     };
   }
