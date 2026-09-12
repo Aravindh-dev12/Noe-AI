@@ -16,7 +16,7 @@ Every pull request into `main` must pass, on the exact head commit being merged:
 - production builds for web, API, worker, and shared packages
 - runtime smoke test against PostgreSQL + Redis using deterministic mock actors
 
-PR #2 established this gate and passed all of it on commit `10346ccb49c6da977eae29504ddf0fa90f1b8a90`.
+PR #2 established this gate. Do not replace the CI status with a manually recorded SHA here; GitHub Actions is the source of truth for the exact PR head being merged.
 
 ## Data-integrity invariants
 
