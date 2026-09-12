@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+export * from './bargain.js';
+
 export const TRIAD_ENVIRONMENT_ID = 'triad';
 export const TRIAD_ENVIRONMENT_VERSION = '1.0.0';
 
