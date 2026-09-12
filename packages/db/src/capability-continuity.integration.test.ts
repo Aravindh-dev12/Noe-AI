@@ -210,9 +210,17 @@ describe('execution capability continuity', () => {
 
     // Later revocation changes today's authority state but must not corrupt the
     // immutable historical admissibility basis captured for either execution.
+    // Revocation is a complete projection: who revoked the grant and why is
+    // part of the canonical authority history, not optional bookkeeping.
     await db.authorityGrant.update({
       where: { id: grantId },
-      data: { status: 'REVOKED', revokedAt: new Date('2026-09-03T00:00:00.000Z') },
+      data: {
+        status: 'REVOKED',
+        revokedAt: new Date('2026-09-03T00:00:00.000Z'),
+        revokedByType: 'system',
+        revokedById: 'capability-continuity-test',
+        revocationReason: 'execution capability expansion requires a new authority grant',
+      },
     });
 
     const verification = await verifyCapabilityContinuity(actorId);
