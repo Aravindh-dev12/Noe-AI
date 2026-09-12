@@ -52,7 +52,8 @@ export function canonicalJson(value: unknown): string {
 }
 
 function hashingView(event: UnsignedActorEvent): UnsignedActorEvent {
-  const { signature: _signature, ...provenance } = event.provenance;
+  const { signature, ...provenance } = event.provenance;
+  void signature;
   return {
     ...event,
     provenance,
