@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { db } from '@onbae/db';
+import { assertActorControlOperationalAt, db } from '@onbae/db';
 import { z } from 'zod';
 
 import { assertActorControl, requirePrincipal } from '../lib/auth.js';
@@ -59,15 +59,41 @@ export async function matchRoutes(app: FastifyInstance) {
       }
 
       const matchId = `match_${randomUUID()}`;
-      const match = await db.match.create({
-        data: {
-          id: matchId,
-          environmentId: environment.id,
-          actorAId: actorA.id,
-          actorBId: actorB.id,
-          seed: input.seed ?? null,
-          status: 'SCHEDULED',
-        },
+      const scheduledAt = new Date();
+      const match = await db.$transaction(async (tx) => {
+        // Serialize scheduling with control recovery/quarantine transitions so a
+        // match cannot be admitted through a race immediately after quarantine.
+        const orderedActorIds = [actorA.id, actorB.id].sort();
+        await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT "id" FROM "Actor"
+          WHERE "id" = ${orderedActorIds[0]!} OR "id" = ${orderedActorIds[1]!}
+          ORDER BY "id" FOR UPDATE
+        `;
+
+        const currentActors = await tx.actor.findMany({
+          where: { id: { in: orderedActorIds } },
+          select: { id: true, status: true },
+        });
+        if (currentActors.length !== 2 || currentActors.some((actor) => actor.status !== 'ACTIVE')) {
+          throw Object.assign(new Error('Both actors must remain active to schedule a match.'), {
+            statusCode: 409,
+          });
+        }
+
+        await assertActorControlOperationalAt(tx, actorA.id, scheduledAt);
+        await assertActorControlOperationalAt(tx, actorB.id, scheduledAt);
+
+        return tx.match.create({
+          data: {
+            id: matchId,
+            environmentId: environment.id,
+            actorAId: actorA.id,
+            actorBId: actorB.id,
+            seed: input.seed ?? null,
+            status: 'SCHEDULED',
+            scheduledAt,
+          },
+        });
       });
 
       try {
