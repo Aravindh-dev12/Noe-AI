@@ -42,7 +42,7 @@ await app.register(rateLimit, {
   timeWindow: '1 minute',
 });
 
-app.setErrorHandler((error, request, reply) => {
+app.setErrorHandler((error: unknown, request, reply) => {
   if (error instanceof ZodError) {
     return reply.code(400).send({
       error: 'validation_error',
@@ -51,17 +51,16 @@ app.setErrorHandler((error, request, reply) => {
     });
   }
 
-  const statusCode =
-    typeof (error as { statusCode?: unknown }).statusCode === 'number'
-      ? (error as { statusCode: number }).statusCode
-      : 500;
+  const maybeStatusCode = (error as { statusCode?: unknown } | null)?.statusCode;
+  const statusCode = typeof maybeStatusCode === 'number' ? maybeStatusCode : 500;
+  const message = error instanceof Error ? error.message : 'Request failed.';
 
   if (statusCode >= 500) {
     request.log.error({ err: error }, 'unhandled request error');
   }
 
   return reply.code(statusCode).send({
-    error: statusCode >= 500 ? 'internal_error' : error.message,
+    error: statusCode >= 500 ? 'internal_error' : message,
     requestId: request.id,
   });
 });
