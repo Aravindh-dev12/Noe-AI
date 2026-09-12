@@ -114,8 +114,8 @@ function normalizeMoney(
   return { amountMinor: amount, currency: code };
 }
 
-function setAllows(parent: string[], value: string): boolean {
-  return parent.includes('*') || parent.includes(value);
+function setAllows(scope: string[], value: string): boolean {
+  return scope.includes('*') || scope.includes(value);
 }
 
 export function isAuthoritySetSubset(parent: string[], child: string[]): boolean {
@@ -178,7 +178,6 @@ function assertDelegationShape(input: {
 export function assertAuthorityAttenuation(
   parent: Pick<
     AuthorityGrant,
-    | 'subjectActorId'
     | 'actions'
     | 'resources'
     | 'canRedelegate'
@@ -226,10 +225,7 @@ export function assertAuthorityAttenuation(
       throw new AuthorityConflictError('Child monetary authority exceeds its parent cap.');
     }
   }
-  if (
-    child.canRedelegate &&
-    child.remainingDelegationDepth >= parent.remainingDelegationDepth
-  ) {
+  if (child.canRedelegate && child.remainingDelegationDepth >= parent.remainingDelegationDepth) {
     throw new AuthorityConflictError(
       'Child delegation depth must be strictly smaller than the parent delegation depth.',
     );
@@ -244,7 +240,9 @@ export function assertAuthorityAttenuation(
 function lifecycleIssues(chain: AuthorityGrant[], at: Date): string[] {
   const issues: string[] = [];
   for (const grant of chain) {
-    if (grant.status !== 'ACTIVE') issues.push(`grant ${grant.id} is ${grant.status.toLowerCase()}`);
+    if (grant.status !== 'ACTIVE') {
+      issues.push(`grant ${grant.id} is ${grant.status.toLowerCase()}`);
+    }
     if (at.getTime() < grant.notBefore.getTime()) {
       issues.push(`grant ${grant.id} is not active yet`);
     }
@@ -322,7 +320,9 @@ async function loadAuthorityChain(
       throw new AuthorityConflictError('Authority grant ancestry exceeds the maximum depth.');
     }
     seen.add(cursor);
-    const grant = await tx.authorityGrant.findUnique({ where: { id: cursor } });
+    const grant: AuthorityGrant | null = await tx.authorityGrant.findUnique({
+      where: { id: cursor },
+    });
     if (!grant) {
       throw Object.assign(new Error('Authority grant not found.'), { statusCode: 404 });
     }
@@ -333,18 +333,20 @@ async function loadAuthorityChain(
   return reversed.reverse();
 }
 
+type NormalizedGrant = {
+  grantor: AuthorityGrantor;
+  actions: string[];
+  resources: string[];
+  canRedelegate: boolean;
+  remainingDelegationDepth: number;
+  maxAmountMinor: string | null;
+  currency: string | null;
+};
+
 function sameGrant(
   existing: AuthorityGrant,
   input: CreateAuthorityGrantInput,
-  normalized: {
-    grantor: AuthorityGrantor;
-    actions: string[];
-    resources: string[];
-    canRedelegate: boolean;
-    remainingDelegationDepth: number;
-    maxAmountMinor: string | null;
-    currency: string | null;
-  },
+  normalized: NormalizedGrant,
 ): boolean {
   return (
     existing.subjectActorId === input.subjectActorId &&
@@ -357,14 +359,55 @@ function sameGrant(
     existing.remainingDelegationDepth === normalized.remainingDelegationDepth &&
     existing.maxAmountMinor === normalized.maxAmountMinor &&
     existing.currency === normalized.currency &&
-    (input.notBefore === undefined ||
-      existing.notBefore.getTime() === input.notBefore.getTime()) &&
-    existing.expiresAt?.getTime() === input.expiresAt?.getTime() &&
+    (input.notBefore === undefined || existing.notBefore.getTime() === input.notBefore.getTime()) &&
+    (input.expiresAt === undefined ||
+      existing.expiresAt?.getTime() === input.expiresAt?.getTime()) &&
     existing.externalFramework === (input.externalFramework ?? null) &&
     existing.externalReference === (input.externalReference ?? null) &&
     existing.sourceEvidenceArtifactId === (input.sourceEvidenceArtifactId ?? null) &&
+    existing.issuedByType === input.principal.type &&
+    existing.issuedById === (input.principal.id ?? null) &&
     canonicalJson(existing.metadata) === canonicalJson(input.metadata ?? {})
   );
+}
+
+async function resolveGrantor(
+  tx: Prisma.TransactionClient,
+  input: CreateAuthorityGrantInput,
+): Promise<{ parent: AuthorityGrant | null; grantor: AuthorityGrantor }> {
+  if (input.parentGrantId) {
+    await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "AuthorityGrant" WHERE "id" = ${input.parentGrantId} FOR UPDATE
+    `;
+    const parent: AuthorityGrant | null = await tx.authorityGrant.findUnique({
+      where: { id: input.parentGrantId },
+    });
+    if (!parent) {
+      throw Object.assign(new Error('Parent authority grant not found.'), { statusCode: 404 });
+    }
+    return { parent, grantor: { type: 'actor', ref: parent.subjectActorId } };
+  }
+
+  if (!input.grantor) {
+    throw new AuthorityValidationError('Root authority requires a grantor.');
+  }
+  const ref = input.grantor.ref.trim();
+  if (!ref) {
+    throw new AuthorityValidationError('grantor.ref is required.');
+  }
+  const grantor = { type: input.grantor.type, ref } satisfies AuthorityGrantor;
+
+  if (grantor.type === 'actor') {
+    const grantorActor = await tx.actor.findUnique({
+      where: { id: grantor.ref },
+      select: { id: true },
+    });
+    if (!grantorActor) {
+      throw Object.assign(new Error('Grantor actor not found.'), { statusCode: 404 });
+    }
+  }
+
+  return { parent: null, grantor };
 }
 
 export async function createAuthorityGrant(
@@ -393,17 +436,39 @@ export async function createAuthorityGrant(
       throw Object.assign(new Error('Authority subject actor not found.'), { statusCode: 404 });
     }
 
-    let parent: AuthorityGrant | null = null;
-    let grantor: AuthorityGrantor;
+    const { parent, grantor } = await resolveGrantor(tx, input);
+    const normalized: NormalizedGrant = {
+      grantor,
+      actions,
+      resources,
+      canRedelegate,
+      remainingDelegationDepth,
+      maxAmountMinor: money.amountMinor,
+      currency: money.currency,
+    };
 
-    if (input.parentGrantId) {
-      await tx.$queryRaw<Array<{ id: string }>>`
-        SELECT "id" FROM "AuthorityGrant" WHERE "id" = ${input.parentGrantId} FOR UPDATE
-      `;
-      parent = await tx.authorityGrant.findUnique({ where: { id: input.parentGrantId } });
-      if (!parent) {
-        throw Object.assign(new Error('Parent authority grant not found.'), { statusCode: 404 });
+    // Idempotent replays are historical lookups: they must not begin failing
+    // merely because a parent grant was later revoked or expired.
+    const existing = await tx.authorityGrant.findUnique({
+      where: { idempotencyKey: input.idempotencyKey },
+      include: {
+        transitions: { orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }], take: 1 },
+      },
+    });
+    if (existing) {
+      if (!sameGrant(existing, input, normalized)) {
+        throw new AuthorityConflictError(
+          `Authority idempotency key ${input.idempotencyKey} was reused with conflicting data.`,
+        );
       }
+      const transition = existing.transitions[0];
+      if (!transition) {
+        throw new AuthorityConflictError('Existing authority grant is missing its opening transition.');
+      }
+      return { grant: existing, transition, replayed: true };
+    }
+
+    if (parent) {
       const parentChain = await loadAuthorityChain(tx, parent.id);
       const parentIssues = lifecycleIssues(parentChain, now);
       if (parentIssues.length > 0) {
@@ -411,7 +476,6 @@ export async function createAuthorityGrant(
           `Parent authority is not currently effective: ${parentIssues.join('; ')}.`,
         );
       }
-      grantor = { type: 'actor', ref: parent.subjectActorId };
       assertAuthorityAttenuation(parent, {
         actions,
         resources,
@@ -422,52 +486,6 @@ export async function createAuthorityGrant(
         notBefore,
         expiresAt,
       });
-    } else {
-      if (!input.grantor) {
-        throw new AuthorityValidationError('Root authority requires a grantor.');
-      }
-      if (!input.grantor.ref.trim()) {
-        throw new AuthorityValidationError('grantor.ref is required.');
-      }
-      grantor = { type: input.grantor.type, ref: input.grantor.ref.trim() };
-      if (grantor.type === 'actor') {
-        const grantorActor = await tx.actor.findUnique({
-          where: { id: grantor.ref },
-          select: { id: true },
-        });
-        if (!grantorActor) {
-          throw Object.assign(new Error('Grantor actor not found.'), { statusCode: 404 });
-        }
-      }
-    }
-
-    const existing = await tx.authorityGrant.findUnique({
-      where: { idempotencyKey: input.idempotencyKey },
-      include: {
-        transitions: { orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }], take: 1 },
-      },
-    });
-    if (existing) {
-      if (
-        !sameGrant(existing, input, {
-          grantor,
-          actions,
-          resources,
-          canRedelegate,
-          remainingDelegationDepth,
-          maxAmountMinor: money.amountMinor,
-          currency: money.currency,
-        })
-      ) {
-        throw new AuthorityConflictError(
-          `Authority idempotency key ${input.idempotencyKey} was reused with conflicting data.`,
-        );
-      }
-      const transition = existing.transitions[0];
-      if (!transition) {
-        throw new AuthorityConflictError('Existing authority grant is missing its opening transition.');
-      }
-      return { grant: existing, transition, replayed: true };
     }
 
     if (input.sourceEvidenceArtifactId) {
@@ -799,7 +817,14 @@ export async function verifyAuthorityState(actorId: string): Promise<{
         where: { sourceKey: `authority:grant:${grant.id}:opened` },
         select: { actorId: true, type: true },
       });
-      if (!openedEvent || openedEvent.actorId !== actorId) {
+      const expectedOpeningType = grant.parentGrantId
+        ? 'actor.authority.delegated'
+        : 'actor.authority.granted';
+      if (
+        !openedEvent ||
+        openedEvent.actorId !== actorId ||
+        openedEvent.type !== expectedOpeningType
+      ) {
         issues.push(`grant ${grant.id} is missing its canonical opening event`);
       }
       if (grant.status === 'REVOKED') {
@@ -807,7 +832,11 @@ export async function verifyAuthorityState(actorId: string): Promise<{
           where: { sourceKey: `authority:grant:${grant.id}:revoked` },
           select: { actorId: true, type: true },
         });
-        if (!revokedEvent || revokedEvent.actorId !== actorId) {
+        if (
+          !revokedEvent ||
+          revokedEvent.actorId !== actorId ||
+          revokedEvent.type !== 'actor.authority.revoked'
+        ) {
           issues.push(`grant ${grant.id} is missing its canonical revocation event`);
         }
       }
