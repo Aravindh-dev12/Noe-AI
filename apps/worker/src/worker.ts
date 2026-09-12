@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { Job, Worker } from 'bullmq';
-import Redis from 'ioredis';
+import { Worker } from 'bullmq';
+import type { Job } from 'bullmq';
+import { Redis } from 'ioredis';
 import { db, type Prisma } from '@onbae/db';
 import {
   TRIAD_ENVIRONMENT_VERSION,
@@ -72,7 +73,7 @@ async function appendCanonicalEvent(
     data: {
       id: event.id,
       actorId: event.actorId,
-      executionId: event.executionId,
+      executionId: input.executionId,
       hostId: event.hostId,
       type: event.type,
       occurredAt: new Date(event.occurredAt),
