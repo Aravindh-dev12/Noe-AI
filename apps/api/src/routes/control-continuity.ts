@@ -122,7 +122,11 @@ export async function controlContinuityRoutes(app: FastifyInstance) {
       {
         actorId: input.actorId,
         threshold: input.threshold,
-        guardians: input.guardians,
+        guardians: input.guardians.map((guardian) => ({
+          principalType: guardian.principalType,
+          principalRef: guardian.principalRef,
+          ...(guardian.role !== undefined ? { role: guardian.role } : {}),
+        })),
         ...(input.challengeWindowSeconds !== undefined
           ? { challengeWindowSeconds: input.challengeWindowSeconds }
           : {}),
