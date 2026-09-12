@@ -153,23 +153,37 @@ beta_id=$(json_field id <<<"$beta_json")
 owned_json=$(curl --fail --silent --show-error --max-time 5 -b "$owner_cookies" "$api/v1/me/actors")
 python3 -c 'import json,sys; d=json.load(sys.stdin); handles={a["handle"] for a in d}; assert {"smoke-alpha","smoke-beta"}.issubset(handles)' <<<"$owned_json"
 
-# Attach independently-addressable evidence and open an obligation before the
-# model migration. Institutional continuity requires both to stay with Alpha.
+# One immutable artifact may concern multiple actors. Bind the same digest to
+# Alpha (debtor) and Beta (counterparty), then record independent validation.
 evidence_json=$(curl --fail-with-body --silent --show-error --max-time 10 \
   -X POST "$api/v1/evidence" \
   -H 'content-type: application/json' \
   -H "x-noeone-admin-key: ${ADMIN_API_KEY}" \
-  --data "{\"actorId\":\"${alpha_id}\",\"kind\":\"smoke.contract.offer\",\"issuer\":\"smoke-counterparty\",\"digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"verificationStatus\":\"verified\",\"metadata\":{\"privateNote\":\"must-not-leak-publicly\"}}")
-evidence_id=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["evidence"]["id"])' <<<"$evidence_json")
+  --data "{\"actorId\":\"${alpha_id}\",\"role\":\"debtor\",\"kind\":\"smoke.contract.offer\",\"issuer\":\"smoke-counterparty\",\"digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"artifactMetadata\":{\"privateNote\":\"must-not-leak-publicly\"},\"bindingMetadata\":{\"side\":\"alpha\"}}")
+evidence_artifact_id=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["artifact"]["id"])' <<<"$evidence_json")
+
+beta_evidence_json=$(curl --fail-with-body --silent --show-error --max-time 10 \
+  -X POST "$api/v1/evidence" \
+  -H 'content-type: application/json' \
+  -H "x-noeone-admin-key: ${ADMIN_API_KEY}" \
+  --data "{\"actorId\":\"${beta_id}\",\"role\":\"creditor\",\"kind\":\"smoke.contract.offer\",\"issuer\":\"smoke-counterparty\",\"digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"artifactMetadata\":{\"privateNote\":\"must-not-leak-publicly\"},\"bindingMetadata\":{\"side\":\"beta\"}}")
+EVIDENCE_ARTIFACT_ID="$evidence_artifact_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["artifact"]["id"] == os.environ["EVIDENCE_ARTIFACT_ID"]; assert d["replayed"] is False' <<<"$beta_evidence_json"
+
+evidence_validation_json=$(curl --fail-with-body --silent --show-error --max-time 10 \
+  -X POST "$api/v1/evidence/${evidence_artifact_id}/validations" \
+  -H 'content-type: application/json' \
+  -H "x-noeone-admin-key: ${ADMIN_API_KEY}" \
+  --data '{"validator":"noeone-smoke-validator","status":"verified","method":"digest-and-issuer","idempotencyKey":"smoke-evidence-validation-v1"}')
+python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["validation"]["status"] == "VERIFIED"; assert d["replayed"] is False' <<<"$evidence_validation_json"
 
 public_evidence=$(curl --fail --silent --show-error --max-time 5 "$api/v1/actors/smoke-alpha/evidence")
-EVIDENCE_ID="$evidence_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); e=d["data"][0]; assert e["id"] == os.environ["EVIDENCE_ID"]; assert e["verificationStatus"] == "VERIFIED"; assert "metadata" not in e; assert "uri" not in e; assert "externalId" not in e' <<<"$public_evidence"
+EVIDENCE_ARTIFACT_ID="$evidence_artifact_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); b=d["data"][0]; a=b["artifact"]; assert d["version"] == "noeone.evidence.v2"; assert b["role"] == "debtor"; assert a["id"] == os.environ["EVIDENCE_ARTIFACT_ID"]; assert a["validations"][0]["status"] == "VERIFIED"; assert "metadata" not in a; assert "uri" not in a; assert "externalId" not in a; assert "metadata" not in b' <<<"$public_evidence"
 
 commitment_json=$(curl --fail-with-body --silent --show-error --max-time 10 \
   -X POST "$api/v1/commitments" \
   -H 'content-type: application/json' \
   -H "x-noeone-admin-key: ${ADMIN_API_KEY}" \
-  --data "{\"debtorActorId\":\"${alpha_id}\",\"creditorActorId\":\"${beta_id}\",\"kind\":\"smoke.delivery\",\"termsDigest\":\"sha256:2222222222222222222222222222222222222222222222222222222222222222\",\"sourceEvidenceId\":\"${evidence_id}\",\"externalFramework\":\"smoke-contract-v1\",\"idempotencyKey\":\"smoke-alpha-beta-delivery-v1\",\"metadata\":{\"privateTerms\":\"not-public\"}}")
+  --data "{\"debtorActorId\":\"${alpha_id}\",\"creditorActorId\":\"${beta_id}\",\"kind\":\"smoke.delivery\",\"termsDigest\":\"sha256:2222222222222222222222222222222222222222222222222222222222222222\",\"sourceEvidenceArtifactId\":\"${evidence_artifact_id}\",\"externalFramework\":\"smoke-contract-v1\",\"idempotencyKey\":\"smoke-alpha-beta-delivery-v1\",\"metadata\":{\"privateTerms\":\"not-public\"}}")
 commitment_id=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["commitment"]["id"])' <<<"$commitment_json")
 
 private_commitment_status=$(curl --silent --show-error --max-time 5 \
@@ -177,7 +191,7 @@ private_commitment_status=$(curl --silent --show-error --max-time 5 \
 assert_status "401" "$private_commitment_status" "private commitment read without admin"
 
 pre_migration_commitments=$(curl --fail --silent --show-error --max-time 5 "$api/v1/actors/smoke-alpha/commitments")
-COMMITMENT_ID="$commitment_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert len(d["data"]) == 1; c=d["data"][0]; assert c["id"] == os.environ["COMMITMENT_ID"]; assert c["status"] == "OPEN"; assert "metadata" not in c; assert "creditorExternalRef" not in c' <<<"$pre_migration_commitments"
+COMMITMENT_ID="$commitment_id" EVIDENCE_ARTIFACT_ID="$evidence_artifact_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert len(d["data"]) == 1; c=d["data"][0]; assert c["id"] == os.environ["COMMITMENT_ID"]; assert c["status"] == "OPEN"; assert c["sourceEvidence"]["id"] == os.environ["EVIDENCE_ARTIFACT_ID"]; assert "metadata" not in c; assert "creditorExternalRef" not in c' <<<"$pre_migration_commitments"
 
 migration_json=$(curl --fail-with-body --silent --show-error --max-time 10 \
   -b "$owner_cookies" \
@@ -201,7 +215,7 @@ continuity_json=$(curl --fail --silent --show-error --max-time 5 "$api/v1/actors
 ALPHA_ID="$alpha_id" TRANSITION_ID="$transition_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["version"] == "noeone.continuity.v1"; assert d["actor"]["id"] == os.environ["ALPHA_ID"]; assert d["transitions"][0]["id"] == os.environ["TRANSITION_ID"]; assert d["transitions"][0]["status"] == "ACCEPTED"; assert d["currentExecution"]["model"] == "echo-seed-v1"' <<<"$continuity_json"
 
 # A fork is ancestry, not continuation. The child must start with zero inherited
-# commitments even though it originates from Alpha's exact current lineage.
+# commitments and zero evidence bindings even though it originates from Alpha.
 fork_json=$(curl --fail-with-body --silent --show-error --max-time 10 \
   -X POST "$api/v1/actors/${alpha_id}/forks" \
   -H 'content-type: application/json' \
@@ -210,8 +224,10 @@ fork_json=$(curl --fail-with-body --silent --show-error --max-time 10 \
 fork_child_id=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["child"]["id"])' <<<"$fork_json")
 fork_commitments=$(curl --fail --silent --show-error --max-time 5 "$api/v1/actors/smoke-alpha-fork/commitments")
 python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["data"] == []' <<<"$fork_commitments"
+fork_evidence=$(curl --fail --silent --show-error --max-time 5 "$api/v1/actors/smoke-alpha-fork/evidence")
+python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["data"] == []' <<<"$fork_evidence"
 fork_passport=$(curl --fail --silent --show-error --max-time 10 "$api/v1/actors/smoke-alpha-fork/passport")
-FORK_ID="$fork_child_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["actor"]["id"] == os.environ["FORK_ID"]; assert d["continuity"]["ancestry"] is not None; assert d["institutional"]["commitmentCount"] == 0' <<<"$fork_passport"
+FORK_ID="$fork_child_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["actor"]["id"] == os.environ["FORK_ID"]; assert d["continuity"]["ancestry"] is not None; assert d["institutional"]["commitmentCount"] == 0; assert d["institutional"]["evidenceArtifactCount"] == 0' <<<"$fork_passport"
 
 # Resolve the parent's obligation with linked evidence. The append-only
 # transition and materialized status must agree under independent verification.
@@ -219,11 +235,11 @@ commitment_transition_json=$(curl --fail-with-body --silent --show-error --max-t
   -X POST "$api/v1/commitments/${commitment_id}/transitions" \
   -H 'content-type: application/json' \
   -H "x-noeone-admin-key: ${ADMIN_API_KEY}" \
-  --data "{\"toStatus\":\"fulfilled\",\"evidenceRefId\":\"${evidence_id}\",\"reason\":\"ci fulfillment\",\"idempotencyKey\":\"smoke-alpha-beta-fulfilled-v1\"}")
+  --data "{\"toStatus\":\"fulfilled\",\"evidenceArtifactId\":\"${evidence_artifact_id}\",\"reason\":\"ci fulfillment\",\"idempotencyKey\":\"smoke-alpha-beta-fulfilled-v1\"}")
 COMMITMENT_ID="$commitment_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["commitment"]["id"] == os.environ["COMMITMENT_ID"]; assert d["commitment"]["status"] == "FULFILLED"; assert d["transition"]["toStatus"] == "FULFILLED"' <<<"$commitment_transition_json"
 
 institutional_verify=$(curl --fail --silent --show-error --max-time 10 "$api/v1/actors/smoke-alpha/institutional/verify")
-ALPHA_ID="$alpha_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["version"] == "noeone.institutional-verification.v1"; assert d["actorId"] == os.environ["ALPHA_ID"]; assert d["valid"] is True; assert d["evidenceCount"] == 1; assert d["commitmentCount"] == 1; assert d["transitionCount"] == 2; assert d["errors"] == []' <<<"$institutional_verify"
+ALPHA_ID="$alpha_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["version"] == "noeone.institutional-verification.v1"; assert d["actorId"] == os.environ["ALPHA_ID"]; assert d["valid"] is True; assert d["evidenceArtifactCount"] == 1; assert d["evidenceValidationCount"] == 1; assert d["commitmentCount"] == 1; assert d["transitionCount"] == 2; assert d["errors"] == []' <<<"$institutional_verify"
 
 curl --fail-with-body --silent --show-error --max-time 10 \
   -X POST "$api/api/auth/sign-up/email" \
@@ -266,7 +282,7 @@ verification_json=$(curl --fail --silent --show-error --max-time 10 "$api/v1/act
 ALPHA_ID="$alpha_id" TRANSITION_ID="$transition_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["verificationVersion"] == "noeone.verify.v2"; assert d["actorId"] == os.environ["ALPHA_ID"]; assert d["valid"] is True; assert d["chain"]["valid"] is True; assert d["eventCount"] >= 7; assert d["registrySignatures"]["checked"] == d["registrySignatures"]["valid"]; assert d["registrySignatures"]["invalid"] == 0; assert d["registrySignatures"]["missing"] == 0; assert d["hostReceipts"]["invalid"] == 0; assert d["continuity"]["valid"] is True; assert d["continuity"]["coverage"] == "governed"; assert d["continuity"]["transitions"]["accepted"] >= 1' <<<"$verification_json"
 
 passport_json=$(curl --fail --silent --show-error --max-time 10 "$api/v1/actors/smoke-alpha/passport")
-ALPHA_ID="$alpha_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["passportVersion"] == "noeone.actor-passport.v3"; assert d["actor"]["id"] == os.environ["ALPHA_ID"]; assert d["verification"]["valid"] is True; assert d["verification"]["continuity"]["valid"] is True; assert d["career"]["canonicalEvents"] >= 7; assert d["continuity"]["transitionCount"] >= 1; assert d["institutional"]["verification"]["valid"] is True; assert d["institutional"]["evidenceCount"] == 1; assert d["institutional"]["evidenceByVerificationStatus"]["verified"] == 1; assert d["institutional"]["commitmentCount"] == 1; assert d["institutional"]["commitmentsByStatus"]["fulfilled"] == 1' <<<"$passport_json"
+ALPHA_ID="$alpha_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["passportVersion"] == "noeone.actor-passport.v3"; assert d["actor"]["id"] == os.environ["ALPHA_ID"]; assert d["verification"]["valid"] is True; assert d["verification"]["continuity"]["valid"] is True; assert d["career"]["canonicalEvents"] >= 7; assert d["continuity"]["transitionCount"] >= 1; assert d["institutional"]["verification"]["valid"] is True; assert d["institutional"]["evidenceArtifactCount"] == 1; assert d["institutional"]["evidenceBindingCount"] == 1; assert d["institutional"]["evidenceValidationCount"] == 1; assert d["institutional"]["evidenceValidationsByStatus"]["verified"] == 1; assert d["institutional"]["commitmentCount"] == 1; assert d["institutional"]["commitmentsByStatus"]["fulfilled"] == 1' <<<"$passport_json"
 
 NODE_ENV=production pnpm --filter @onbae/web start >"$web_log" 2>&1 &
 web_pid=$!
@@ -279,4 +295,4 @@ if grep -q "Rate limiting could not determine a client IP" "$api_log"; then
   exit 1
 fi
 
-echo "NOEONE frozen install, authentication, ownership isolation, governed continuity, institutional commitments, fork non-inheritance, match execution, canonical verification, actor passport v3, and production web smoke tests passed."
+echo "NOEONE frozen install, authentication, ownership isolation, normalized evidence, independent validation, governed continuity, institutional commitments, fork non-inheritance, match execution, canonical verification, actor passport v3, and production web smoke tests passed."
