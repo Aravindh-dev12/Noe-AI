@@ -98,6 +98,7 @@ export async function passportRoutes(app: FastifyInstance) {
         authorityGroups,
         exerciseGroups,
         attributionGroups,
+        intentBindingGroups,
         oldestOpen,
         nextAuthorityExpiry,
       ] = await Promise.all([
@@ -130,6 +131,14 @@ export async function passportRoutes(app: FastifyInstance) {
         db.consequenceAttribution.groupBy({
           by: ['disposition'],
           where: { actorId: actor.id },
+          _count: { _all: true },
+        }),
+        db.actorEvidenceBinding.groupBy({
+          by: ['role'],
+          where: {
+            actorId: actor.id,
+            role: { in: ['intent_mandate', 'intent_transform', 'intent_assessment'] },
+          },
           _count: { _all: true },
         }),
         db.commitment.findFirst({
@@ -167,8 +176,13 @@ export async function passportRoutes(app: FastifyInstance) {
       const attributions = Object.fromEntries(
         attributionGroups.map((group) => [group.disposition.toLowerCase(), group._count._all]),
       );
+      const intentBindings = Object.fromEntries(
+        intentBindingGroups.map((group) => [group.role, group._count._all]),
+      );
 
       return {
+        // Adding the optional intent section is backward-compatible with the v5 shape.
+        // Reserve a version bump for removals/renames or changed field semantics.
         passportVersion: 'noeone.actor-passport.v5',
         actor: {
           id: actor.id,
@@ -210,6 +224,12 @@ export async function passportRoutes(app: FastifyInstance) {
           exerciseCount: actor._count.authorityExercises,
           exercisesByCoverage: exercises,
           verification: authorityVerification,
+        },
+        intent: {
+          mandateCount: intentBindings.intent_mandate ?? 0,
+          transformCount: intentBindings.intent_transform ?? 0,
+          assessmentCount: intentBindings.intent_assessment ?? 0,
+          structuralVerification: 'per-authority-grant',
         },
         consequences: {
           attributionCount: actor._count.consequenceAttributions,

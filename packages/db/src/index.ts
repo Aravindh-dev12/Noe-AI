@@ -25,4 +25,5 @@ export * from './control-continuity.js';
 export * from './control-operational.js';
 export * from './capability-continuity.js';
 export * from './recognition-continuity.js';
+export * from './intent-continuity.js';
 export * from '@prisma/client';
