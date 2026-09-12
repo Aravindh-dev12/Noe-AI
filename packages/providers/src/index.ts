@@ -34,8 +34,25 @@ export type ProviderFactoryInput = {
 
 const openAIResponseSchema = z.object({
   id: z.string().optional(),
-  output_text: z.string().optional(),
-  output: z.array(z.unknown()).optional(),
+  output: z
+    .array(
+      z
+        .object({
+          type: z.string(),
+          content: z
+            .array(
+              z
+                .object({
+                  type: z.string(),
+                  text: z.string().optional(),
+                })
+                .passthrough(),
+            )
+            .optional(),
+        })
+        .passthrough(),
+    )
+    .default([]),
   usage: z
     .object({
       input_tokens: z.number().optional(),
@@ -98,6 +115,28 @@ async function fetchWithTimeout(
   }
 }
 
+async function providerHttpError(provider: string, response: Response): Promise<Error> {
+  // Consume the response body so the underlying connection can be reused, but do
+  // not persist provider error bodies because they can contain request context.
+  await response.text().catch(() => '');
+  const requestId =
+    response.headers.get('x-request-id') ??
+    response.headers.get('request-id') ??
+    response.headers.get('anthropic-request-id');
+  return new Error(
+    `${provider} request failed (${response.status})${requestId ? ` [request ${requestId}]` : ''}.`,
+  );
+}
+
+function extractOpenAIText(parsed: z.infer<typeof openAIResponseSchema>): string {
+  return parsed.output
+    .flatMap((item) => item.content ?? [])
+    .filter((part) => part.type === 'output_text')
+    .map((part) => part.text ?? '')
+    .join('\n')
+    .trim();
+}
+
 export class OpenAIProvider implements ModelProvider {
   readonly providerId = 'openai';
 
@@ -126,18 +165,18 @@ export class OpenAIProvider implements ModelProvider {
     );
 
     if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`OpenAI request failed (${response.status}): ${body.slice(0, 1_000)}`);
+      throw await providerHttpError('OpenAI', response);
     }
 
     const parsed = openAIResponseSchema.parse(await response.json());
-    if (!parsed.output_text) {
-      throw new Error('OpenAI response did not contain output_text.');
+    const rawText = extractOpenAIText(parsed);
+    if (!rawText) {
+      throw new Error('OpenAI response did not contain output_text content.');
     }
 
     const usage = buildUsage(parsed.usage?.input_tokens, parsed.usage?.output_tokens);
     return {
-      rawText: parsed.output_text,
+      rawText,
       ...(usage ? { usage } : {}),
       providerMetadata: parsed.id ? { responseId: parsed.id } : {},
     };
@@ -173,8 +212,7 @@ export class AnthropicProvider implements ModelProvider {
     );
 
     if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Anthropic request failed (${response.status}): ${body.slice(0, 1_000)}`);
+      throw await providerHttpError('Anthropic', response);
     }
 
     const parsed = anthropicResponseSchema.parse(await response.json());
