@@ -26,6 +26,11 @@ export const auth = betterAuth({
   advanced: {
     cookiePrefix: 'onbae',
     useSecureCookies: env.NODE_ENV === 'production',
+    ipAddress: {
+      // This header is injected by Onbae's Fastify route from request.ip and overwrites
+      // any client-supplied value before Better Auth sees the request.
+      ipAddressHeaders: ['x-onbae-client-ip'],
+    },
     database: {
       joins: true,
     },
