@@ -1,26 +1,19 @@
 import type { FastifyInstance } from 'fastify';
-import { fromNodeHeaders } from 'better-auth/node';
 
 import { auth } from '../lib/auth-system.js';
-import { getPrincipal } from '../lib/auth.js';
+import { getPrincipal, trustedAuthHeaders } from '../lib/auth.js';
+import { env } from '../env.js';
 
 export async function authRoutes(app: FastifyInstance) {
   app.route({
     method: ['GET', 'POST'],
     url: '/api/auth/*',
     async handler(request, reply) {
-      const host = request.headers.host;
-      if (!host) {
-        return reply.code(400).send({ error: 'missing_host_header' });
-      }
-
-      const forwardedProto = request.headers['x-forwarded-proto'];
-      const protocol =
-        typeof forwardedProto === 'string' && forwardedProto.length > 0
-          ? forwardedProto.split(',')[0]!.trim()
-          : request.protocol;
-      const url = new URL(request.url, `${protocol}://${host}`);
-      const headers = fromNodeHeaders(request.headers);
+      // Build Better Auth URLs from the configured canonical API origin instead of
+      // trusting Host/X-Forwarded-* values supplied by the request. Fastify still
+      // resolves request.ip through its separately configured trustProxy boundary.
+      const url = new URL(request.url, env.BETTER_AUTH_URL);
+      const headers = trustedAuthHeaders(request);
 
       const authRequest = new Request(url.toString(), {
         method: request.method,
@@ -52,15 +45,19 @@ export async function authRoutes(app: FastifyInstance) {
     }
 
     const session = await auth.api.getSession({
-      headers: fromNodeHeaders(request.headers),
+      headers: trustedAuthHeaders(request),
     });
+
+    if (!session) {
+      return reply.code(401).send({ authenticated: false });
+    }
 
     return {
       authenticated: true,
-      user: session!.user,
+      user: session.user,
       session: {
-        id: session!.session.id,
-        expiresAt: session!.session.expiresAt,
+        id: session.session.id,
+        expiresAt: session.session.expiresAt,
       },
     };
   });
