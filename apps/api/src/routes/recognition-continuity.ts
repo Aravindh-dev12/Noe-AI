@@ -68,12 +68,12 @@ export async function recognitionContinuityRoutes(app: FastifyInstance) {
       policyFramework: input.policyFramework ?? null,
       policyVersion: input.policyVersion,
       sourceEvidenceArtifactId: input.sourceEvidenceArtifactId ?? null,
-      assessedAt: input.assessedAt ?? new Date(),
-      validUntil: input.validUntil ?? null,
       conditions: input.conditions ?? [],
       reasons: input.reasons ?? [],
       idempotencyKey: input.idempotencyKey,
       metadata: input.metadata ?? {},
+      ...(input.assessedAt ? { assessedAt: input.assessedAt } : {}),
+      ...(input.validUntil !== undefined ? { validUntil: input.validUntil } : {}),
     });
     return reply.code(result.replayed ? 200 : 201).send(result);
   });
