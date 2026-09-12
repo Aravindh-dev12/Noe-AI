@@ -1,6 +1,17 @@
+import { generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
-import { assertEventChain, createActorEvent, verifyEventHash } from './index.js';
+import {
+  HOST_RECEIPT_VERSION,
+  assertEventChain,
+  canonicalJson,
+  createActorEvent,
+  hashHostReceipt,
+  signHostReceipt,
+  verifyEventHash,
+  verifyHostReceiptSignature,
+  type HostReceipt,
+} from './index.js';
 
 const base = {
   actorId: 'act_demo',
@@ -14,22 +25,58 @@ const base = {
   canonicalStatus: 'accepted' as const,
 };
 
+const hostReceipt: HostReceipt = {
+  version: HOST_RECEIPT_VERSION,
+  receiptId: 'receipt_demo_001',
+  hostId: 'host_external',
+  keyId: 'key_2026_01',
+  actorId: 'act_demo',
+  executionId: 'exec_demo',
+  environmentId: 'env_external_1',
+  environmentVersion: 'arena@1.2.0',
+  type: 'competition.result',
+  occurredAt: '2026-01-01T00:00:00.000Z',
+  payload: { result: 'win', opponentActorId: 'act_other' },
+};
+
+describe('canonical JSON', () => {
+  it('sorts raw property names by UTF-16 code units instead of locale collation', () => {
+    const value = {
+      '\u20ac': 'Euro Sign',
+      '\r': 'Carriage Return',
+      '\ufb33': 'Hebrew Letter Dalet With Dagesh',
+      '1': 'One',
+      '\ud83d\ude00': 'Emoji: Grinning Face',
+      '\u0080': 'Control',
+      '\u00f6': 'Latin Small Letter O With Diaeresis',
+    };
+    const parsed = JSON.parse(canonicalJson(value)) as Record<string, unknown>;
+
+    expect(Object.keys(parsed)).toEqual([
+      '\r',
+      '1',
+      '\u0080',
+      '\u00f6',
+      '\u20ac',
+      '\ud83d\ude00',
+      '\ufb33',
+    ]);
+  });
+
+  it('rejects values outside interoperable JSON', () => {
+    expect(() => canonicalJson({ bad: Number.NaN })).toThrow(/NaN or Infinity/);
+    expect(() => canonicalJson({ bad: Number.POSITIVE_INFINITY })).toThrow(/NaN or Infinity/);
+    expect(() => canonicalJson({ bad: 1n })).toThrow(/not valid canonical JSON/);
+  });
+});
+
 describe('canonical events', () => {
   it('hashes deterministically', () => {
     const event = createActorEvent({ id: 'evt_1', ...base });
     expect(verifyEventHash(event)).toBe(true);
 
-    const reordered = createActorEvent({
-      id: 'evt_1',
-      ...base,
-      payload: { z: 1, a: 2 },
-    });
-    const reorderedAgain = createActorEvent({
-      id: 'evt_1',
-      ...base,
-      payload: { a: 2, z: 1 },
-    });
-
+    const reordered = createActorEvent({ id: 'evt_1', ...base, payload: { z: 1, a: 2 } });
+    const reorderedAgain = createActorEvent({ id: 'evt_1', ...base, payload: { a: 2, z: 1 } });
     expect(reordered.hash).toBe(reorderedAgain.hash);
   });
 
@@ -56,12 +103,56 @@ describe('canonical events', () => {
       id: 'evt_2',
       ...base,
       type: 'actor.execution.migrated',
-      provenance: {
-        issuer: 'host_demo',
-        previousEventHash: first.hash,
-      },
+      provenance: { issuer: 'host_demo', previousEventHash: first.hash },
     });
 
     expect(() => assertEventChain([first, second])).not.toThrow();
+  });
+});
+
+describe('NOEONE host receipts', () => {
+  it('hashes a receipt canonically', () => {
+    const first = hashHostReceipt(hostReceipt);
+    const second = hashHostReceipt({
+      ...hostReceipt,
+      payload: { opponentActorId: 'act_other', result: 'win' },
+    });
+
+    expect(first).toBe(second);
+    expect(first).toMatch(/^sha256:[a-f0-9]{64}$/);
+  });
+
+  it('signs and verifies Ed25519 host statements', () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const privateKeyPem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
+
+    const signature = signHostReceipt(hostReceipt, privateKeyPem);
+    expect(signature).toMatch(/^ed25519:/);
+    expect(verifyHostReceiptSignature(hostReceipt, signature, publicKeyPem)).toBe(true);
+    expect(
+      verifyHostReceiptSignature(
+        { ...hostReceipt, payload: { ...hostReceipt.payload, result: 'loss' } },
+        signature,
+        publicKeyPem,
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects a signature from another host key', () => {
+    const signer = generateKeyPairSync('ed25519');
+    const other = generateKeyPairSync('ed25519');
+    const signature = signHostReceipt(
+      hostReceipt,
+      signer.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+    );
+
+    expect(
+      verifyHostReceiptSignature(
+        hostReceipt,
+        signature,
+        other.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+      ),
+    ).toBe(false);
   });
 });

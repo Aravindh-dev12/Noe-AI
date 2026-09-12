@@ -5,7 +5,7 @@ import { db } from '@onbae/db';
 import { env } from '../env.js';
 
 export const auth = betterAuth({
-  appName: 'Onbae',
+  appName: 'NOEONE',
   baseURL: env.BETTER_AUTH_URL,
   basePath: '/api/auth',
   secret: env.BETTER_AUTH_SECRET,
@@ -24,12 +24,14 @@ export const auth = betterAuth({
     updateAge: 60 * 60 * 24,
   },
   advanced: {
+    // Keep the legacy cookie namespace through the brand migration so existing
+    // authenticated sessions are not invalidated merely by the rename.
     cookiePrefix: 'onbae',
     useSecureCookies: env.NODE_ENV === 'production',
     ipAddress: {
-      // This header is injected by Onbae's Fastify route from request.ip and overwrites
-      // any client-supplied value before Better Auth sees the request.
-      ipAddressHeaders: ['x-onbae-client-ip'],
+      // Injected by NOEONE's Fastify boundary from request.ip; client input with
+      // this name is overwritten before Better Auth sees it.
+      ipAddressHeaders: ['x-noeone-client-ip'],
     },
     database: {
       joins: true,
@@ -37,4 +39,6 @@ export const auth = betterAuth({
   },
 });
 
-export type OnbaeSession = Awaited<ReturnType<typeof auth.api.getSession>>;
+export type NoeoneSession = Awaited<ReturnType<typeof auth.api.getSession>>;
+/** @deprecated Compatibility alias during the NOEONE brand migration. */
+export type OnbaeSession = NoeoneSession;
