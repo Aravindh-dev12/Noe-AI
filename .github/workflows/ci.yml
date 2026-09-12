@@ -35,7 +35,6 @@ jobs:
     env:
       DATABASE_URL: postgresql://onbae:onbae@localhost:5432/onbae?schema=public
       REDIS_URL: redis://localhost:6379
-      AUTH_SECRET: ci-only-auth-secret-with-more-than-32-characters
       EVENT_SIGNING_SECRET: ci-only-event-secret-with-more-than-32-characters
       ONBAE_API_URL: http://localhost:4000
       NEXT_PUBLIC_API_URL: http://localhost:4000
@@ -48,7 +47,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
       - run: pnpm install --frozen-lockfile=false
       - run: pnpm db:generate
       - run: pnpm db:push
