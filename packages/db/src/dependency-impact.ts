@@ -205,18 +205,73 @@ async function findAssessmentByBasis(basisDigest: string) {
   return rows[0] ?? null;
 }
 
+function normalizedRequestFields(input: DependencyImpactAssessmentInput) {
+  const evaluator = input.evaluator.trim();
+  const method = input.method.trim().toLowerCase();
+  const methodVersion = input.methodVersion.trim();
+  if (!evaluator || !method || !methodVersion) {
+    throw Object.assign(new Error('Evaluator, method, and methodVersion are required.'), {
+      statusCode: 400,
+    });
+  }
+  return { evaluator, method, methodVersion };
+}
+
+function matchesIdempotentRequest(
+  assessment: DependencyImpactAssessmentRow,
+  input: DependencyImpactAssessmentInput,
+  exposureAt: Date,
+  normalized: ReturnType<typeof normalizedRequestFields>,
+): boolean {
+  return (
+    assessment.incidentId === input.incidentId &&
+    assessment.actorId === input.actorId &&
+    assessment.executionId === input.executionId &&
+    assessment.disposition === input.disposition &&
+    assessment.evaluator === normalized.evaluator &&
+    assessment.method === normalized.method &&
+    assessment.methodVersion === normalized.methodVersion &&
+    assessment.sourceEvidenceArtifactId === input.sourceEvidenceArtifactId &&
+    assessment.exposureAt.getTime() === exposureAt.getTime() &&
+    assessment.confidenceBps === (input.confidenceBps ?? null)
+  );
+}
+
 export async function recordDependencyImpactAssessment(input: DependencyImpactAssessmentInput) {
   if (input.confidenceBps !== undefined) {
-    if (!Number.isInteger(input.confidenceBps) || input.confidenceBps < 0 || input.confidenceBps > 10_000) {
+    if (
+      !Number.isInteger(input.confidenceBps) ||
+      input.confidenceBps < 0 ||
+      input.confidenceBps > 10_000
+    ) {
       throw Object.assign(new Error('confidenceBps must be an integer between 0 and 10000.'), {
         statusCode: 400,
       });
     }
   }
 
+  const normalized = normalizedRequestFields(input);
   const incident = await getIncident(input.incidentId);
   const exposureAt = input.exposureAt ?? incident.startedAt;
-  const exposure = await getDependencyExposure(incident.componentId, exposureAt, input.maxDepth ?? 8);
+
+  // Idempotency is a historical replay contract. Check the stored request
+  // semantics before consulting today's dependency graph. New dependency
+  // knowledge discovered later must not turn an exact replay into a conflict.
+  const existingByKey = await findAssessmentByIdempotency(input.idempotencyKey);
+  if (existingByKey) {
+    if (!matchesIdempotentRequest(existingByKey, input, exposureAt, normalized)) {
+      throw new DependencyImpactConflictError(
+        'Impact-assessment idempotency key was reused with different input.',
+      );
+    }
+    return { replayed: true, assessment: existingByKey };
+  }
+
+  const exposure = await getDependencyExposure(
+    incident.componentId,
+    exposureAt,
+    input.maxDepth ?? 8,
+  );
   const { snapshotId, pathBasis } = normalizePathBasis(
     incident.id,
     incident.componentId,
@@ -226,16 +281,6 @@ export async function recordDependencyImpactAssessment(input: DependencyImpactAs
     exposure.paths,
   );
   const pathDigest = sha256(pathBasis);
-  const normalized = {
-    evaluator: input.evaluator.trim(),
-    method: input.method.trim().toLowerCase(),
-    methodVersion: input.methodVersion.trim(),
-  };
-  if (!normalized.evaluator || !normalized.method || !normalized.methodVersion) {
-    throw Object.assign(new Error('Evaluator, method, and methodVersion are required.'), {
-      statusCode: 400,
-    });
-  }
 
   const basisDigest = sha256(
     assessmentBasis({
@@ -253,16 +298,6 @@ export async function recordDependencyImpactAssessment(input: DependencyImpactAs
       pathDigest,
     }),
   );
-
-  const existingByKey = await findAssessmentByIdempotency(input.idempotencyKey);
-  if (existingByKey) {
-    if (existingByKey.basisDigest !== basisDigest) {
-      throw new DependencyImpactConflictError(
-        'Impact-assessment idempotency key was reused with different input.',
-      );
-    }
-    return { replayed: true, assessment: existingByKey };
-  }
 
   const existingByBasis = await findAssessmentByBasis(basisDigest);
   if (existingByBasis) return { replayed: true, assessment: existingByBasis };
@@ -288,7 +323,7 @@ export async function recordDependencyImpactAssessment(input: DependencyImpactAs
 
   const racedByKey = await findAssessmentByIdempotency(input.idempotencyKey);
   if (racedByKey) {
-    if (racedByKey.basisDigest !== basisDigest) {
+    if (!matchesIdempotentRequest(racedByKey, input, exposureAt, normalized)) {
       throw new DependencyImpactConflictError(
         'Impact-assessment idempotency key raced with different input.',
       );
