@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { FormEvent } from 'react';
 
 import { authClient } from '../../lib/auth-client';
 
@@ -29,7 +30,6 @@ type PublicActor = {
   actorType: string;
   currentExecution: { provider: string; model: string } | null;
 };
-
 type ApiError = { error?: string; message?: string };
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
@@ -57,12 +57,20 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+function formString(form: FormData, key: string): string {
+  const value = form.get(key);
+  return typeof value === 'string' ? value : '';
+}
+
 function pairValue(model: UserModel) {
   return `${model.provider}:${model.model}`;
 }
 
 function splitPair(value: string): UserModel {
   const separator = value.indexOf(':');
+  if (separator <= 0 || separator === value.length - 1) {
+    throw new Error('Invalid model selection.');
+  }
   return { provider: value.slice(0, separator), model: value.slice(separator + 1) };
 }
 
@@ -112,12 +120,12 @@ export function AccountConsole() {
     setAuthBusy(true);
     setAuthMessage(null);
     const form = new FormData(event.currentTarget);
-    const email = String(form.get('email') ?? '').trim();
-    const password = String(form.get('password') ?? '');
+    const email = formString(form, 'email').trim();
+    const password = formString(form, 'password');
 
     try {
       if (authMode === 'signup') {
-        const name = String(form.get('name') ?? '').trim();
+        const name = formString(form, 'name').trim();
         const result = await authClient.signUp.email({ name, email, password });
         if (result.error) throw new Error(result.error.message ?? 'Sign-up failed.');
         setAuthMode('signin');
@@ -140,15 +148,15 @@ export function AccountConsole() {
     setActionBusy(true);
     setActionMessage(null);
     const form = new FormData(event.currentTarget);
-    const selected = splitPair(String(form.get('model')));
+    const selected = splitPair(formString(form, 'model'));
 
     try {
       const actor = await apiRequest<{ handle: string }>('/v1/actors', {
         method: 'POST',
         body: JSON.stringify({
-          handle: String(form.get('handle') ?? ''),
-          displayName: String(form.get('displayName') ?? ''),
-          description: String(form.get('description') ?? ''),
+          handle: formString(form, 'handle'),
+          displayName: formString(form, 'displayName'),
+          description: formString(form, 'description'),
           actorType: 'user',
           provider: selected.provider,
           model: selected.model,
@@ -170,8 +178,8 @@ export function AccountConsole() {
     setActionBusy(true);
     setActionMessage(null);
     const form = new FormData(event.currentTarget);
-    const actorId = String(form.get('actorId') ?? '');
-    const selected = splitPair(String(form.get('model')));
+    const actorId = formString(form, 'actorId');
+    const selected = splitPair(formString(form, 'model'));
 
     try {
       await apiRequest(`/v1/actors/${encodeURIComponent(actorId)}/migrate`, {
@@ -202,8 +210,8 @@ export function AccountConsole() {
       const match = await apiRequest<{ id: string }>('/v1/matches', {
         method: 'POST',
         body: JSON.stringify({
-          actorAId: String(form.get('actorAId') ?? ''),
-          actorBId: String(form.get('actorBId') ?? ''),
+          actorAId: formString(form, 'actorAId'),
+          actorBId: formString(form, 'actorBId'),
           environmentId: 'env_triad_v1',
         }),
       });
@@ -238,7 +246,7 @@ export function AccountConsole() {
               Create account
             </button>
           </div>
-          <form className="form-stack" onSubmit={handleAuth}>
+          <form className="form-stack" onSubmit={(event) => void handleAuth(event)}>
             {authMode === 'signup' ? (
               <label className="field">
                 <span>Name</span>
@@ -281,7 +289,9 @@ export function AccountConsole() {
           <button
             className="text-button"
             type="button"
-            onClick={() => void authClient.signOut().then(() => window.location.reload())}
+            onClick={() => {
+              void authClient.signOut().then(() => window.location.reload());
+            }}
           >
             Sign out
           </button>
@@ -328,7 +338,7 @@ export function AccountConsole() {
           <p>Identity stays fixed. Execution can change.</p>
         </div>
         <div className="action-grid">
-          <form className="card action-card form-stack" onSubmit={createActorAction}>
+          <form className="card action-card form-stack" onSubmit={(event) => void createActorAction(event)}>
             <div><span className="eyebrow">01</span><h3>Create actor</h3></div>
             <label className="field"><span>Display name</span><input name="displayName" required maxLength={80} placeholder="Nova" /></label>
             <label className="field"><span>Handle</span><input name="handle" required minLength={3} maxLength={32} placeholder="nova" /></label>
@@ -342,7 +352,7 @@ export function AccountConsole() {
             <button className="primary-button" disabled={actionBusy || models.length === 0} type="submit">Create persistent actor</button>
           </form>
 
-          <form className="card action-card form-stack" onSubmit={migrateActorAction}>
+          <form className="card action-card form-stack" onSubmit={(event) => void migrateActorAction(event)}>
             <div><span className="eyebrow">02</span><h3>Change brain</h3></div>
             <p className="form-help">Migrate the execution while preserving actor ID, lineage, rivals and history.</p>
             <label className="field">
@@ -356,7 +366,7 @@ export function AccountConsole() {
             <button className="primary-button" disabled={actionBusy || actors.length === 0 || models.length === 0} type="submit">Migrate execution</button>
           </form>
 
-          <form className="card action-card form-stack" onSubmit={challengeAction}>
+          <form className="card action-card form-stack" onSubmit={(event) => void challengeAction(event)}>
             <div><span className="eyebrow">03</span><h3>Challenge</h3></div>
             <p className="form-help">Send your actor into a verified environment against a provider or research actor.</p>
             <label className="field">
