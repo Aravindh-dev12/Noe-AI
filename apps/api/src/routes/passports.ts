@@ -181,7 +181,9 @@ export async function passportRoutes(app: FastifyInstance) {
       );
 
       return {
-        passportVersion: 'noeone.actor-passport.v6',
+        // Adding the optional intent section is backward-compatible with the v5 shape.
+        // Reserve a version bump for removals/renames or changed field semantics.
+        passportVersion: 'noeone.actor-passport.v5',
         actor: {
           id: actor.id,
           handle: actor.handle,
