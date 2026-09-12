@@ -19,6 +19,7 @@ import { dependencyImpactRoutes } from './routes/dependency-impact.js';
 import { dependencyRoutes } from './routes/dependencies.js';
 import { hostRoutes } from './routes/hosts.js';
 import { institutionalRoutes } from './routes/institutional.js';
+import { institutionalSuccessionRoutes } from './routes/institutional-succession.js';
 import { matchRoutes } from './routes/matches.js';
 import { passportRoutes } from './routes/passports.js';
 import { publicRoutes } from './routes/public.js';
@@ -104,6 +105,7 @@ await dependencyImpactRoutes(app);
 await matchRoutes(app);
 await hostRoutes(app);
 await institutionalRoutes(app);
+await institutionalSuccessionRoutes(app);
 await verificationRoutes(app);
 await passportRoutes(app);
 
