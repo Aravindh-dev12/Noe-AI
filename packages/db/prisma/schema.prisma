@@ -43,6 +43,7 @@ enum EnvironmentStatus {
 enum MatchStatus {
   SCHEDULED
   RUNNING
+  RETRYING
   COMPLETED
   FAILED
   CANCELLED
@@ -80,19 +81,19 @@ model Session {
 }
 
 model Account {
-  id                     String    @id
-  accountId              String
-  providerId             String
-  userId                 String
-  accessToken            String?
-  refreshToken           String?
-  idToken                String?
-  accessTokenExpiresAt   DateTime?
-  refreshTokenExpiresAt  DateTime?
-  scope                   String?
-  password                String?
-  createdAt               DateTime  @default(now())
-  updatedAt               DateTime  @updatedAt
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -220,7 +221,7 @@ model ActorEvent {
   payload            Json
   issuer             String
   signature          String?
-  previousEventHash  String?         @unique
+  previousEventHash  String?
   hash               String          @unique
   canonicalStatus    CanonicalStatus @default(ACCEPTED)
   createdAt          DateTime        @default(now())
