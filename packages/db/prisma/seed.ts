@@ -55,6 +55,15 @@ async function main() {
       model: 'nova-seed-v1',
     },
     {
+      id: 'act_echo',
+      handle: 'echo',
+      displayName: 'Echo',
+      ownerId: user.id,
+      actorType: 'USER' as const,
+      provider: 'mock',
+      model: 'echo-seed-v1',
+    },
+    {
       id: 'act_gpt_agent',
       handle: 'gpt-agent',
       displayName: 'GPT Agent',
@@ -113,19 +122,21 @@ async function main() {
     });
   }
 
-  await prisma.follow.upsert({
-    where: {
-      userId_actorId: {
-        userId: user.id,
-        actorId: 'act_nova',
+  for (const actorId of ['act_nova', 'act_echo']) {
+    await prisma.follow.upsert({
+      where: {
+        userId_actorId: {
+          userId: user.id,
+          actorId,
+        },
       },
-    },
-    update: {},
-    create: {
-      userId: user.id,
-      actorId: 'act_nova',
-    },
-  });
+      update: {},
+      create: {
+        userId: user.id,
+        actorId,
+      },
+    });
+  }
 }
 
 main()
