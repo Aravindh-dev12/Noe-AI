@@ -22,6 +22,7 @@ import { institutionalRoutes } from './routes/institutional.js';
 import { matchRoutes } from './routes/matches.js';
 import { passportRoutes } from './routes/passports.js';
 import { publicRoutes } from './routes/public.js';
+import { recognitionContinuityRoutes } from './routes/recognition-continuity.js';
 import { verificationRoutes } from './routes/verification.js';
 
 const app = Fastify({
@@ -93,6 +94,7 @@ await authRoutes(app);
 await publicRoutes(app);
 await actorRoutes(app);
 await continuityRoutes(app);
+await recognitionContinuityRoutes(app);
 await controlContinuityRoutes(app);
 await authorityRoutes(app);
 await capabilityContinuityRoutes(app);
