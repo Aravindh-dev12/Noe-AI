@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -61,6 +64,36 @@ jobs:
             --from-empty \
             --to-schema-datamodel prisma/schema.prisma \
             --script > build-artifacts/000000000000_init.sql
+      - name: Bootstrap lockfile and migration onto PR branch
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        shell: bash
+        run: |
+          cp build-artifacts/pnpm-lock.yaml pnpm-lock.yaml
+          mkdir -p packages/db/prisma/migrations/000000000000_init
+          cp build-artifacts/000000000000_init.sql packages/db/prisma/migrations/000000000000_init/migration.sql
+          cat >> packages/db/prisma/migrations/000000000000_init/migration.sql <<'SQL'
+
+          -- Onbae integrity constraints not representable in Prisma schema syntax.
+          CREATE UNIQUE INDEX "ActorExecution_one_active_per_actor_key"
+            ON "ActorExecution"("actorId")
+            WHERE "endedAt" IS NULL;
+
+          CREATE UNIQUE INDEX "LineageNode_one_canonical_per_actor_key"
+            ON "LineageNode"("actorId")
+            WHERE "canonical" = true;
+          SQL
+          printf 'provider = "postgresql"\n' > packages/db/prisma/migrations/migration_lock.toml
+
+          git add pnpm-lock.yaml packages/db/prisma/migrations
+          if git diff --cached --quiet; then
+            echo "Reproducibility files are already committed."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "build: commit lockfile and initial migration"
+          git push origin HEAD:${GITHUB_HEAD_REF}
       - name: Upload reproducibility artifacts
         uses: actions/upload-artifact@v4
         with:
