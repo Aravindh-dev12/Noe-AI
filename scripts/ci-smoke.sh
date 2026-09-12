@@ -155,14 +155,21 @@ python3 -c 'import json,sys; d=json.load(sys.stdin); handles={a["handle"] for a 
 
 migration_json=$(curl --fail-with-body --silent --show-error --max-time 10 \
   -b "$owner_cookies" \
-  -X POST "$api/v1/actors/${alpha_id}/migrate" \
+  -X POST "$api/v1/actors/${alpha_id}/continuity/migrations" \
   -H "origin: ${origin}" \
   -H 'content-type: application/json' \
   --data '{"provider":"mock","model":"echo-seed-v1","runtime":"noeone-worker","reason":"ci continuity test"}')
-ALPHA_ID="$alpha_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["actorId"] == os.environ["ALPHA_ID"]' <<<"$migration_json"
+ALPHA_ID="$alpha_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["actorId"] == os.environ["ALPHA_ID"]; assert d["transitionStatus"] == "accepted"; assert d["executionId"]; assert d["lineageId"]' <<<"$migration_json"
+transition_id=$(json_field transitionId <<<"$migration_json")
+
+transition_json=$(curl --fail --silent --show-error --max-time 5 "$api/v1/continuity/${transition_id}")
+TRANSITION_ID="$transition_id" ALPHA_ID="$alpha_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["id"] == os.environ["TRANSITION_ID"]; assert d["actorId"] == os.environ["ALPHA_ID"]; assert d["status"] == "ACCEPTED"; assert d["resultingExecutionId"]; assert d["resultingLineageId"]' <<<"$transition_json"
 
 alpha_profile=$(curl --fail --silent --show-error --max-time 5 "$api/v1/actors/smoke-alpha")
-ALPHA_ID="$alpha_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["id"] == os.environ["ALPHA_ID"]; assert d["executions"][0]["model"] == "echo-seed-v1"; assert any(e["type"] == "actor.execution.migrated" for e in d["events"])' <<<"$alpha_profile"
+ALPHA_ID="$alpha_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["id"] == os.environ["ALPHA_ID"]; assert d["executions"][0]["model"] == "echo-seed-v1"; assert any(e["type"] == "actor.continuity.transition.accepted" for e in d["events"])' <<<"$alpha_profile"
+
+continuity_json=$(curl --fail --silent --show-error --max-time 5 "$api/v1/actors/smoke-alpha/continuity")
+ALPHA_ID="$alpha_id" TRANSITION_ID="$transition_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["version"] == "noeone.continuity.v1"; assert d["actor"]["id"] == os.environ["ALPHA_ID"]; assert d["transitions"][0]["id"] == os.environ["TRANSITION_ID"]; assert d["transitions"][0]["status"] == "ACCEPTED"; assert d["currentExecution"]["model"] == "echo-seed-v1"' <<<"$continuity_json"
 
 curl --fail-with-body --silent --show-error --max-time 10 \
   -X POST "$api/api/auth/sign-up/email" \
@@ -179,14 +186,14 @@ curl --fail-with-body --silent --show-error --max-time 10 \
 
 forbidden_status=$(curl --silent --show-error --max-time 10 \
   -o /tmp/forbidden.json -w '%{http_code}' -b "$stranger_cookies" \
-  -X POST "$api/v1/actors/${alpha_id}/migrate" -H "origin: ${origin}" \
+  -X POST "$api/v1/actors/${alpha_id}/continuity/migrations" -H "origin: ${origin}" \
   -H 'content-type: application/json' \
   --data '{"provider":"mock","model":"nova-seed-v1","runtime":"noeone-worker"}')
 assert_status "403" "$forbidden_status" "cross-owner migration"
 
 unauthenticated_status=$(curl --silent --show-error --max-time 10 \
   -o /tmp/unauthenticated.json -w '%{http_code}' \
-  -X POST "$api/v1/actors/${alpha_id}/migrate" -H "origin: ${origin}" \
+  -X POST "$api/v1/actors/${alpha_id}/continuity/migrations" -H "origin: ${origin}" \
   -H 'content-type: application/json' \
   --data '{"provider":"mock","model":"nova-seed-v1","runtime":"noeone-worker"}')
 assert_status "401" "$unauthenticated_status" "unauthenticated migration"
@@ -202,10 +209,10 @@ alpha_after_match=$(curl --fail --silent --show-error --max-time 5 "$api/v1/acto
 python3 -c 'import json,sys; d=json.load(sys.stdin); assert any(e["type"] == "competition.result" for e in d["events"])' <<<"$alpha_after_match"
 
 verification_json=$(curl --fail --silent --show-error --max-time 10 "$api/v1/actors/smoke-alpha/verify")
-ALPHA_ID="$alpha_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["verificationVersion"] == "noeone.verify.v1"; assert d["actorId"] == os.environ["ALPHA_ID"]; assert d["valid"] is True; assert d["chain"]["valid"] is True; assert d["eventCount"] >= 3; assert d["registrySignatures"]["checked"] == d["registrySignatures"]["valid"]; assert d["registrySignatures"]["invalid"] == 0; assert d["registrySignatures"]["missing"] == 0; assert d["hostReceipts"]["invalid"] == 0' <<<"$verification_json"
+ALPHA_ID="$alpha_id" TRANSITION_ID="$transition_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["verificationVersion"] == "noeone.verify.v2"; assert d["actorId"] == os.environ["ALPHA_ID"]; assert d["valid"] is True; assert d["chain"]["valid"] is True; assert d["eventCount"] >= 3; assert d["registrySignatures"]["checked"] == d["registrySignatures"]["valid"]; assert d["registrySignatures"]["invalid"] == 0; assert d["registrySignatures"]["missing"] == 0; assert d["hostReceipts"]["invalid"] == 0; assert d["continuity"]["valid"] is True; assert d["continuity"]["coverage"] == "governed"; assert d["continuity"]["transitions"]["accepted"] >= 1' <<<"$verification_json"
 
 passport_json=$(curl --fail --silent --show-error --max-time 10 "$api/v1/actors/smoke-alpha/passport")
-ALPHA_ID="$alpha_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["passportVersion"] == "noeone.actor-passport.v1"; assert d["actor"]["id"] == os.environ["ALPHA_ID"]; assert d["verification"]["valid"] is True; assert d["career"]["canonicalEvents"] >= 3' <<<"$passport_json"
+ALPHA_ID="$alpha_id" python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["passportVersion"] == "noeone.actor-passport.v2"; assert d["actor"]["id"] == os.environ["ALPHA_ID"]; assert d["verification"]["valid"] is True; assert d["verification"]["continuity"]["valid"] is True; assert d["career"]["canonicalEvents"] >= 3; assert d["continuity"]["transitionCount"] >= 1' <<<"$passport_json"
 
 NODE_ENV=production pnpm --filter @onbae/web start >"$web_log" 2>&1 &
 web_pid=$!
@@ -218,4 +225,4 @@ if grep -q "Rate limiting could not determine a client IP" "$api_log"; then
   exit 1
 fi
 
-echo "NOEONE frozen install, authentication, ownership isolation, model migration, match execution, canonical verification, actor passport, and production web smoke tests passed."
+echo "NOEONE frozen install, authentication, ownership isolation, governed continuity, match execution, canonical verification, actor passport, and production web smoke tests passed."

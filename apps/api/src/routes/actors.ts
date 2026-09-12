@@ -1,11 +1,11 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { createActor, normalizeHandle } from '@onbae/actor-core';
 import { appendCanonicalActorEvent, db, Prisma } from '@onbae/db';
 import { z } from 'zod';
 
 import { env } from '../env.js';
-import { assertActorControl, requirePrincipal, requireUserPrincipal } from '../lib/auth.js';
+import { requirePrincipal, requireUserPrincipal } from '../lib/auth.js';
 
 const createActorSchema = z.object({
   handle: z.string().min(3).max(32),
@@ -16,13 +16,6 @@ const createActorSchema = z.object({
   provider: z.string().min(1),
   model: z.string().min(1),
   runtime: z.string().min(1).optional(),
-});
-
-const migrateActorSchema = z.object({
-  provider: z.string().min(1),
-  model: z.string().min(1),
-  runtime: z.string().min(1).optional(),
-  reason: z.string().max(500).optional(),
 });
 
 const paginationSchema = z.object({
@@ -274,9 +267,9 @@ export async function actorRoutes(app: FastifyInstance) {
             executionId: aggregate.execution.id,
             type: 'actor.created',
             sourceKey: `actor:${created.id}:created`,
-            hostId: 'host_onbae',
-            environmentVersion: 'onbae-core@1.0.0',
-            issuer: 'onbae',
+            hostId: 'host_noeone',
+            environmentVersion: 'noeone-core@1.0.0',
+            issuer: 'noeone',
             payload: {
               handle: created.handle,
               actorType: created.actorType.toLowerCase(),
@@ -298,138 +291,5 @@ export async function actorRoutes(app: FastifyInstance) {
       }
       throw error;
     }
-  });
-
-  app.post('/v1/actors/:actorId/migrate', async (request, reply) => {
-    const principal = await requirePrincipal(request);
-    const params = z.object({ actorId: z.string() }).parse(request.params);
-    const input = migrateActorSchema.parse(request.body);
-    const now = new Date();
-    const nextExecutionId = `exec_${randomUUID()}`;
-    const nextLineageId = `lin_${randomUUID()}`;
-
-    if (principal.kind === 'user') {
-      assertAllowedUserModel(input.provider, input.model);
-    }
-
-    const configHash = executionConfigHash({
-      provider: input.provider,
-      model: input.model,
-      runtime: input.runtime,
-    });
-
-    const result = await db.$transaction(async (tx) => {
-      const lockedActors = await tx.$queryRaw<Array<{ id: string }>>`
-        SELECT "id" FROM "Actor" WHERE "id" = ${params.actorId} FOR UPDATE
-      `;
-      if (lockedActors.length !== 1) {
-        throw Object.assign(new Error('Actor not found.'), { statusCode: 404 });
-      }
-
-      const actor = await tx.actor.findUniqueOrThrow({ where: { id: params.actorId } });
-      assertActorControl(principal, actor);
-
-      if (actor.status !== 'ACTIVE') {
-        throw Object.assign(new Error('Actor is not active.'), { statusCode: 409 });
-      }
-
-      const currentExecution = await tx.actorExecution.findFirst({
-        where: { actorId: actor.id, endedAt: null },
-        orderBy: { startedAt: 'desc' },
-      });
-      if (!currentExecution) {
-        throw new Error('Actor has no active execution.');
-      }
-
-      if (
-        currentExecution.provider === input.provider &&
-        currentExecution.model === input.model &&
-        currentExecution.runtime === (input.runtime ?? null)
-      ) {
-        throw Object.assign(new Error('The actor is already using this execution configuration.'), {
-          statusCode: 409,
-        });
-      }
-
-      await tx.actorExecution.update({
-        where: { id: currentExecution.id },
-        data: { endedAt: now },
-      });
-
-      await tx.lineageNode.update({
-        where: { id: actor.canonicalLineageId },
-        data: { canonical: false },
-      });
-
-      await tx.actorExecution.create({
-        data: {
-          id: nextExecutionId,
-          actorId: actor.id,
-          provider: input.provider,
-          model: input.model,
-          runtime: input.runtime ?? null,
-          configHash,
-          startedAt: now,
-        },
-      });
-
-      await tx.lineageNode.create({
-        data: {
-          id: nextLineageId,
-          actorId: actor.id,
-          parentNodeId: actor.canonicalLineageId,
-          kind: 'MIGRATION',
-          canonical: true,
-          createdAt: now,
-          metadata: {
-            fromExecutionId: currentExecution.id,
-            toExecutionId: nextExecutionId,
-            reason: input.reason ?? 'execution migration',
-          },
-        },
-      });
-
-      await tx.actor.update({
-        where: { id: actor.id },
-        data: { canonicalLineageId: nextLineageId },
-      });
-
-      await appendCanonicalActorEvent(
-        tx,
-        {
-          actorId: actor.id,
-          executionId: nextExecutionId,
-          type: 'actor.execution.migrated',
-          sourceKey: `lineage:${nextLineageId}:migration`,
-          occurredAt: now,
-          hostId: 'host_onbae',
-          environmentVersion: 'onbae-core@1.0.0',
-          issuer: 'onbae',
-          payload: {
-            from: {
-              provider: currentExecution.provider,
-              model: currentExecution.model,
-              executionId: currentExecution.id,
-            },
-            to: {
-              provider: input.provider,
-              model: input.model,
-              executionId: nextExecutionId,
-            },
-            reason: input.reason ?? null,
-          },
-        },
-        env.EVENT_SIGNING_SECRET,
-      );
-
-      return {
-        actorId: actor.id,
-        previousExecutionId: currentExecution.id,
-        executionId: nextExecutionId,
-        lineageId: nextLineageId,
-      };
-    });
-
-    return reply.code(201).send(result);
   });
 }

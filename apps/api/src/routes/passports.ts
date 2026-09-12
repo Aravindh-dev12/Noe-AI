@@ -32,6 +32,29 @@ export async function passportRoutes(app: FastifyInstance) {
             startedAt: true,
           },
         },
+        childAncestry: {
+          select: {
+            parentActorId: true,
+            sourceLineageId: true,
+            sourceEventSequence: true,
+            sourceEventHash: true,
+            reason: true,
+            createdAt: true,
+          },
+        },
+        continuityTransitions: {
+          where: { status: 'ACCEPTED' },
+          orderBy: { decidedAt: 'desc' },
+          take: 1,
+          select: {
+            id: true,
+            kind: true,
+            policyVersion: true,
+            predecessorLineageId: true,
+            resultingLineageId: true,
+            decidedAt: true,
+          },
+        },
         _count: {
           select: {
             events: true,
@@ -39,6 +62,8 @@ export async function passportRoutes(app: FastifyInstance) {
             followers: true,
             matchesA: true,
             matchesB: true,
+            continuityTransitions: true,
+            parentAncestries: true,
           },
         },
       },
@@ -55,7 +80,7 @@ export async function passportRoutes(app: FastifyInstance) {
       }
 
       return {
-        passportVersion: 'noeone.actor-passport.v1',
+        passportVersion: 'noeone.actor-passport.v2',
         actor: {
           id: actor.id,
           handle: actor.handle,
@@ -66,6 +91,12 @@ export async function passportRoutes(app: FastifyInstance) {
           createdAt: actor.createdAt,
         },
         currentExecution: actor.executions[0] ?? null,
+        continuity: {
+          transitionCount: actor._count.continuityTransitions,
+          lastAcceptedTransition: actor.continuityTransitions[0] ?? null,
+          ancestry: actor.childAncestry,
+          descendantCount: actor._count.parentAncestries,
+        },
         career: {
           canonicalEvents: actor._count.events,
           externalHostReceipts: actor._count.hostReceipts,

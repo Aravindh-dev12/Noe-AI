@@ -65,16 +65,50 @@ function compareUtf16(a: string, b: string): number {
   return a < b ? -1 : 1;
 }
 
-function canonicalize(value: unknown, seen: Set<object>): unknown {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') {
-    return value;
+/** RFC 8785 rejects lone Unicode surrogates because different runtimes can
+ * serialize them differently, which would make hashes/signatures ambiguous. */
+function assertWellFormedUnicode(value: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) {
+        throw new TypeError('Canonical JSON does not permit lone Unicode surrogates.');
+      }
+      index += 1;
+      continue;
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      throw new TypeError('Canonical JSON does not permit lone Unicode surrogates.');
+    }
   }
+}
+
+/**
+ * Emit RFC 8785/JCS-compatible JSON directly.
+ *
+ * Do not sort keys and then materialize another JavaScript object. ECMAScript
+ * object enumeration promotes integer-index keys (for example "1") ahead of
+ * normal string keys, which silently changes the canonical byte sequence.
+ * Cryptographic callers hash/sign the exact string returned here.
+ */
+function serializeCanonical(value: unknown, seen: Set<object>): string {
+  if (value === null) return 'null';
+
+  if (typeof value === 'string') {
+    assertWellFormedUnicode(value);
+    return JSON.stringify(value);
+  }
+
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) {
       throw new TypeError('Canonical JSON does not permit NaN or Infinity.');
     }
-    return value;
+    return JSON.stringify(value);
   }
+
   if (
     typeof value === 'undefined' ||
     typeof value === 'bigint' ||
@@ -83,34 +117,43 @@ function canonicalize(value: unknown, seen: Set<object>): unknown {
   ) {
     throw new TypeError(`Value of type ${typeof value} is not valid canonical JSON.`);
   }
+
   if (Array.isArray(value)) {
     if (seen.has(value)) throw new TypeError('Canonical JSON does not permit cyclic values.');
     seen.add(value);
-    const result = value.map((child) => canonicalize(child, seen));
-    seen.delete(value);
-    return result;
+    try {
+      return `[${value.map((child) => serializeCanonical(child, seen)).join(',')}]`;
+    } finally {
+      seen.delete(value);
+    }
   }
+
   if (typeof value === 'object') {
     if (seen.has(value)) throw new TypeError('Canonical JSON does not permit cyclic values.');
     const prototype = Reflect.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) {
       throw new TypeError('Canonical JSON only accepts plain JSON objects.');
     }
+
     seen.add(value);
-    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
-      compareUtf16(a, b),
-    );
-    const result = Object.fromEntries(
-      entries.map(([key, child]) => [key, canonicalize(child, seen)]),
-    );
-    seen.delete(value);
-    return result;
+    try {
+      const object = value as Record<string, unknown>;
+      const keys = Object.keys(object).sort(compareUtf16);
+      const members = keys.map((key) => {
+        assertWellFormedUnicode(key);
+        return `${JSON.stringify(key)}:${serializeCanonical(object[key], seen)}`;
+      });
+      return `{${members.join(',')}}`;
+    } finally {
+      seen.delete(value);
+    }
   }
+
   throw new TypeError('Unsupported canonical JSON value.');
 }
 
 export function canonicalJson(value: unknown): string {
-  return JSON.stringify(canonicalize(value, new Set()));
+  return serializeCanonical(value, new Set());
 }
 
 function hashingView(event: UnsignedActorEvent): UnsignedActorEvent {
