@@ -30,7 +30,11 @@ const paginationSchema = z.object({
   cursor: z.string().optional(),
 });
 
-function executionConfigHash(input: { provider: string; model: string; runtime?: string }) {
+function executionConfigHash(input: {
+  provider: string;
+  model: string;
+  runtime: string | undefined;
+}) {
   return `sha256:${createHash('sha256')
     .update(JSON.stringify({ provider: input.provider, model: input.model, runtime: input.runtime ?? null }))
     .digest('hex')}`;
@@ -137,7 +141,11 @@ export async function actorRoutes(app: FastifyInstance) {
   app.post('/v1/actors', async (request, reply) => {
     assertAdmin(request);
     const input = createActorSchema.parse(request.body);
-    const configHash = executionConfigHash(input);
+    const configHash = executionConfigHash({
+      provider: input.provider,
+      model: input.model,
+      runtime: input.runtime,
+    });
     const aggregate = createActor({
       handle: input.handle,
       displayName: input.displayName,
@@ -156,7 +164,7 @@ export async function actorRoutes(app: FastifyInstance) {
             id: aggregate.actor.id,
             handle: aggregate.actor.handle,
             displayName: aggregate.actor.displayName,
-            description: input.description,
+            description: input.description ?? null,
             ownerId: aggregate.actor.ownerId,
             actorType: actorTypeToDb(aggregate.actor.actorType),
             status: 'ACTIVE',
@@ -222,7 +230,11 @@ export async function actorRoutes(app: FastifyInstance) {
     const now = new Date();
     const nextExecutionId = `exec_${randomUUID()}`;
     const nextLineageId = `lin_${randomUUID()}`;
-    const configHash = executionConfigHash(input);
+    const configHash = executionConfigHash({
+      provider: input.provider,
+      model: input.model,
+      runtime: input.runtime,
+    });
 
     const result = await db.$transaction(async (tx) => {
       const actor = await tx.actor.findUnique({ where: { id: params.actorId } });
