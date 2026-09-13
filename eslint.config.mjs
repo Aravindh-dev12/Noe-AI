@@ -34,4 +34,35 @@ export default tseslint.config(
       '@typescript-eslint/require-await': 'off',
     },
   },
+  {
+    // These persistence-boundary modules intentionally bridge validated domain
+    // objects into Prisma JSON inputs and strip integrity-only fields before
+    // recomputing semantic digests. TypeScript still checks the underlying
+    // assignments; this narrowly avoids lint false positives at those edges.
+    files: [
+      'packages/db/src/consequence-reception.ts',
+      'packages/db/src/reliance-provenance.ts',
+    ],
+    rules: {
+      '@typescript-eslint/no-unnecessary-type-assertion': 'off',
+    },
+  },
+  {
+    files: ['packages/db/src/reliance-provenance.ts'],
+    rules: {
+      // `_id`/`_digest` are deliberate object-rest omissions used to recompute
+      // semantic digests without self-referential integrity fields.
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+        },
+      ],
+      // Invalid stored JSON is rendered only for a diagnostic conflict message;
+      // it is never accepted as a structural-change value.
+      '@typescript-eslint/no-base-to-string': 'off',
+    },
+  },
 );
