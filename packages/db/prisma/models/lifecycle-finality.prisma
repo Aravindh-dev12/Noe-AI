@@ -1,0 +1,84 @@
+// Longitudinal actor lifecycle finality and post-closure continuity claims.
+//
+// These models intentionally store scalar references. The committed PostgreSQL
+// migration is the integrity boundary for actor/evidence/lineage relationships,
+// append-only history, temporal ordering, and one accepted continuation per
+// closure. A candidate execution reference is deliberately *not* a foreign key
+// to ActorExecution: a continuity claim must not become an ActorExecution merely
+// because it claims the historical actor's identity.
+
+model ActorLifecycleClosure {
+  id                          String   @id
+  actorId                     String
+  executionId                 String?
+  kind                        String
+  effectiveAt                 DateTime
+  capturedAt                  DateTime
+  sourceEvidenceArtifactId    String
+  externalLifecycleRef        String?
+  proofOfDecommissionRef      String?
+  reasonCode                  String?
+  issuedByType                String
+  issuedByRef                 String
+  authorityEvidenceArtifactId String
+  continuationPolicy          String
+  recoveryPolicyDigest        String?
+  basisDigest                 String   @unique
+  idempotencyKey              String   @unique
+  metadata                    Json     @default("{}")
+  createdAt                   DateTime @default(now())
+
+  @@index([actorId, effectiveAt])
+  @@index([executionId])
+  @@index([sourceEvidenceArtifactId])
+  @@index([authorityEvidenceArtifactId])
+}
+
+model ResurrectionClaim {
+  id                           String   @id
+  actorId                      String
+  closureId                    String
+  candidateExecutionId         String
+  claimType                    String
+  sourceSnapshotDigest         String?
+  sourceLineageNodeId          String
+  continuationAuthorityRef     String
+  recoveryEvidenceArtifactId   String
+  credentialEvidenceArtifactId String?
+  stateCommitmentDigest        String?
+  claimedAt                    DateTime
+  basisDigest                  String   @unique
+  idempotencyKey               String   @unique
+  metadata                     Json     @default("{}")
+  createdAt                    DateTime @default(now())
+
+  @@index([closureId, claimedAt])
+  @@index([actorId, claimedAt])
+  @@index([candidateExecutionId])
+  @@index([sourceLineageNodeId])
+  @@index([recoveryEvidenceArtifactId])
+  @@index([credentialEvidenceArtifactId])
+}
+
+model ResurrectionDecision {
+  id                          String   @id
+  claimId                     String
+  closureId                   String
+  actorId                     String
+  disposition                 String
+  decidedAt                   DateTime
+  decidedByType               String
+  decidedByRef                String
+  authorityEvidenceArtifactId String
+  evidenceArtifactId          String
+  basisDigest                 String   @unique
+  idempotencyKey              String   @unique
+  metadata                    Json     @default("{}")
+  createdAt                   DateTime @default(now())
+
+  @@index([claimId, decidedAt])
+  @@index([closureId, decidedAt])
+  @@index([actorId, decidedAt])
+  @@index([authorityEvidenceArtifactId])
+  @@index([evidenceArtifactId])
+}
