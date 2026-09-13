@@ -20,6 +20,7 @@ import { dependencyImpactRoutes } from './routes/dependency-impact.js';
 import { dependencyRoutes } from './routes/dependencies.js';
 import { externalStateContinuityRoutes } from './routes/external-state-continuity.js';
 import { hostRoutes } from './routes/hosts.js';
+import { institutionalSuccessionRoutes } from './routes/institutional-succession.js';
 import { institutionalRoutes } from './routes/institutional.js';
 import { intentContinuityRoutes } from './routes/intent-continuity.js';
 import { matchRoutes } from './routes/matches.js';
