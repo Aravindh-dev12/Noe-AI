@@ -22,6 +22,7 @@ export type RelianceStructuralChange =
   | 'model'
   | 'runtime'
   | 'owner'
+  | 'history'
   | 'disclosure'
   | 'capability'
   | 'authority'
@@ -64,6 +65,15 @@ export type RelianceChangeAssessment = {
   actorId: string;
   successorLineageId: string;
   successorExecutionId: string;
+  successorExecutionConfigHash: string;
+  successorActorOwnerId?: string;
+  successorEventSequence: number;
+  successorDisclosureBundleDigest: string;
+  successorCapabilitySnapshotDigest?: string;
+  successorAuthoritySnapshotDigest?: string;
+  successorControlSnapshotDigest?: string;
+  successorCorrectiveStateDigest?: string;
+  successorDependencySnapshotDigest?: string;
   successorStateDigest: string;
   structuralChanges: readonly RelianceStructuralChange[];
   disposition: RelianceChangeDisposition;
@@ -99,6 +109,12 @@ function assertOptionalDigest(value: string | undefined, field: string): void {
   if (value !== undefined) assertSha256(value, field);
 }
 
+function assertSequence(value: number, field: string): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${field} must be a non-negative safe integer.`);
+  }
+}
+
 function assertUniqueChanges(changes: readonly RelianceStructuralChange[]): void {
   const seen = new Set<RelianceStructuralChange>();
   for (const change of changes) {
@@ -128,10 +144,7 @@ export function assertValidRelianceBasisRecord(record: RelianceBasisRecord): voi
   assertOptionalDigest(record.controlSnapshotDigest, 'controlSnapshotDigest');
   assertOptionalDigest(record.correctiveStateDigest, 'correctiveStateDigest');
   assertOptionalDigest(record.dependencySnapshotDigest, 'dependencySnapshotDigest');
-
-  if (!Number.isSafeInteger(record.observedEventSequence) || record.observedEventSequence < 0) {
-    throw new Error('observedEventSequence must be a non-negative safe integer.');
-  }
+  assertSequence(record.observedEventSequence, 'observedEventSequence');
 
   const reliedAt = timestamp(record.reliedAt, 'reliedAt');
   const capturedAt = timestamp(record.capturedAt, 'capturedAt');
@@ -164,8 +177,25 @@ export function assertValidRelianceChangeAssessment(
   assertNonEmpty(assessment.method, 'method');
   assertNonEmpty(assessment.methodVersion, 'methodVersion');
   assertNonEmpty(assessment.evidenceArtifactId, 'evidenceArtifactId');
+  assertSha256(assessment.successorExecutionConfigHash, 'successorExecutionConfigHash');
+  assertSha256(assessment.successorDisclosureBundleDigest, 'successorDisclosureBundleDigest');
   assertSha256(assessment.successorStateDigest, 'successorStateDigest');
   assertSha256(assessment.basisDigest, 'assessment.basisDigest');
+  assertOptionalDigest(
+    assessment.successorCapabilitySnapshotDigest,
+    'successorCapabilitySnapshotDigest',
+  );
+  assertOptionalDigest(assessment.successorAuthoritySnapshotDigest, 'successorAuthoritySnapshotDigest');
+  assertOptionalDigest(assessment.successorControlSnapshotDigest, 'successorControlSnapshotDigest');
+  assertOptionalDigest(
+    assessment.successorCorrectiveStateDigest,
+    'successorCorrectiveStateDigest',
+  );
+  assertOptionalDigest(
+    assessment.successorDependencySnapshotDigest,
+    'successorDependencySnapshotDigest',
+  );
+  assertSequence(assessment.successorEventSequence, 'successorEventSequence');
   assertUniqueChanges(assessment.structuralChanges);
 
   if (assessment.relianceId !== basis.id) {
@@ -204,6 +234,7 @@ export function deriveRelianceStructuralChanges(input: {
     model: string;
     runtime: string | null;
     ownerId: string | null;
+    eventSequence: number;
   };
   basisExecution: {
     provider: string;
@@ -226,6 +257,7 @@ export function deriveRelianceStructuralChanges(input: {
   if (successor.model !== basisExecution.model) changes.add('model');
   if (successor.runtime !== basisExecution.runtime) changes.add('runtime');
   if ((successor.ownerId ?? undefined) !== basis.actorOwnerId) changes.add('owner');
+  if (successor.eventSequence !== basis.observedEventSequence) changes.add('history');
   if (input.disclosureBundleDigest !== basis.disclosureBundleDigest) changes.add('disclosure');
 
   const compareSnapshot = (
