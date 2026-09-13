@@ -31,4 +31,5 @@ export * from './transition-clearing.js';
 export * from './intent-continuity.js';
 export * from './actor-resolution.js';
 export * from './actor-resolution-operations.js';
+export * from './collective-continuity.js';
 export * from '@prisma/client';

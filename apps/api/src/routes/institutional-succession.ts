@@ -21,8 +21,8 @@ const partySchema = z.object({
   role: z.enum(['PREDECESSOR', 'SUCCESSOR', 'COUNTERPARTY', 'AUTHORITY_ISSUER', 'ADJUDICATOR']),
   principalType: z.string().min(1).max(120),
   principalRef: z.string().min(1).max(500),
-  required: z.boolean().optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
+  required: z.boolean().default(true),
+  metadata: z.record(z.string(), z.unknown()).default({}),
 });
 
 const agreementSchema = z.object({

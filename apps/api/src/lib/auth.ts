@@ -17,18 +17,20 @@ export type Principal =
 export function trustedAuthHeaders(request: FastifyRequest): Headers {
   const headers = fromNodeHeaders(request.headers);
   // Always overwrite internal IP headers with Fastify's server-derived address.
-  // This prevents spoofing while retaining compatibility across the brand migration.
-  headers.set('x-noe-client-ip', request.ip);
+  // NOEONE is the public header namespace. The shorter NOE and historical
+  // Onbae aliases remain server-controlled compatibility paths so existing
+  // sessions/integrations are not broken by a display-brand migration.
   headers.set('x-noeone-client-ip', request.ip);
+  headers.set('x-noe-client-ip', request.ip);
   return headers;
 }
 
 function providedAdminCredential(request: FastifyRequest): string | null {
-  const current = request.headers['x-noe-admin-key'];
+  const current = request.headers['x-noeone-admin-key'];
   if (typeof current === 'string') return current;
 
   // Compatibility aliases are intentionally read-only migration paths.
-  const previous = request.headers['x-noeone-admin-key'];
+  const previous = request.headers['x-noe-admin-key'];
   if (typeof previous === 'string') return previous;
 
   const legacy = request.headers['x-onbae-admin-key'];
