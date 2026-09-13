@@ -14,6 +14,7 @@ import { actorRoutes } from './routes/actors.js';
 import { authRoutes } from './routes/auth.js';
 import { authorityRoutes } from './routes/authority.js';
 import { capabilityContinuityRoutes } from './routes/capability-continuity.js';
+import { collectiveActionProvenanceRoutes } from './routes/collective-action-provenance.js';
 import { collectiveRoutes } from './routes/collectives.js';
 import { continuityRoutes } from './routes/continuity.js';
 import { controlContinuityRoutes } from './routes/control-continuity.js';
@@ -117,6 +118,7 @@ await hostRoutes(app);
 await institutionalRoutes(app);
 await institutionalSuccessionRoutes(app);
 await collectiveRoutes(app);
+await collectiveActionProvenanceRoutes(app);
 await verificationRoutes(app);
 await passportRoutes(app);
 

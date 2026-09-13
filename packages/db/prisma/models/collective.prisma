@@ -1,4 +1,4 @@
-// C1 persistence for collective actor continuity.
+// C1/C2 persistence for collective actor continuity and action provenance.
 //
 // These models intentionally use scalar actor/evidence identifiers instead of
 // Prisma relation fields. PostgreSQL migration triggers are the trust boundary:
@@ -80,4 +80,111 @@ model CollectiveEpochMembership {
   @@unique([epochId, membershipId])
   @@index([collectiveActorId, epochId])
   @@index([memberActorId, epochId])
+}
+
+model CollectiveDecision {
+  id                 String   @id
+  collectiveActorId  String
+  epochId             String
+  decisionType        String
+  proposalDigest      String
+  method              String
+  methodVersion       String?
+  outcomeDigest       String
+  quorumBps           Int?
+  decidedAt           DateTime
+  evidenceArtifactId  String
+  decisionPolicyDigest String
+  constitutionDigest  String
+  basisDigest         String   @unique
+  idempotencyKey      String   @unique
+  metadata            Json     @default("{}")
+  createdAt           DateTime @default(now())
+
+  @@index([collectiveActorId, decidedAt])
+  @@index([epochId, decidedAt])
+  @@index([evidenceArtifactId])
+}
+
+model CollectiveDecisionParticipation {
+  decisionId        String
+  epochId           String
+  membershipId      String
+  memberActorId     String
+  role              String
+  position          String?
+  weightBps         Int?
+  evidenceArtifactId String?
+  participationDigest String @unique
+  createdAt         DateTime @default(now())
+
+  @@id([decisionId, memberActorId])
+  @@unique([decisionId, membershipId])
+  @@index([epochId, memberActorId])
+  @@index([membershipId])
+  @@index([evidenceArtifactId])
+}
+
+model CollectiveActionBinding {
+  id                        String   @id
+  collectiveActorId         String
+  epochId                    String
+  memberActorId              String?
+  membershipId               String?
+  capacity                   String
+  actedAt                    DateTime
+  sourceKind                 String
+  sourceRef                  String
+  decisionId                 String?
+  claimedAt                  DateTime
+  bindingEvidenceArtifactId  String
+  basisDigest                String   @unique
+  idempotencyKey             String   @unique
+  metadata                   Json     @default("{}")
+  createdAt                  DateTime @default(now())
+
+  @@index([collectiveActorId, actedAt])
+  @@index([epochId, actedAt])
+  @@index([memberActorId, actedAt])
+  @@index([decisionId])
+  @@index([sourceKind, sourceRef])
+  @@index([bindingEvidenceArtifactId])
+}
+
+model CollectiveActionRatification {
+  id                 String   @id
+  actionBindingId    String
+  collectiveActorId  String
+  decisionId         String
+  ratifiedAt         DateTime
+  evidenceArtifactId String
+  basisDigest        String   @unique
+  idempotencyKey     String   @unique
+  metadata           Json     @default("{}")
+  createdAt          DateTime @default(now())
+
+  @@index([actionBindingId, ratifiedAt])
+  @@index([collectiveActorId, ratifiedAt])
+  @@index([decisionId])
+  @@index([evidenceArtifactId])
+}
+
+model CollectiveCapacityAssessment {
+  id                 String   @id
+  actionBindingId    String
+  evaluatorRef       String
+  method             String
+  methodVersion      String
+  disposition        String
+  basisDigest        String   @unique
+  evidenceArtifactId String
+  assessedAt         DateTime
+  idempotencyKey     String   @unique
+  metadata           Json     @default("{}")
+  createdAt          DateTime @default(now())
+
+  @@index([actionBindingId, assessedAt])
+  @@index([evaluatorRef, assessedAt])
+  @@index([method, methodVersion])
+  @@index([evidenceArtifactId])
 }

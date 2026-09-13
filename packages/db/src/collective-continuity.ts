@@ -456,7 +456,7 @@ export async function formCollective(
             leaveEpochId: null,
             joinEvidenceArtifactId: member.joinEvidenceArtifactId ?? formationEvidenceArtifactId,
             leaveEvidenceArtifactId: null,
-            metadata: {} as Prisma.InputJsonValue,
+            metadata: {},
           },
         });
         await tx.collectiveEpochMembership.create({
@@ -726,7 +726,7 @@ export async function transitionCollective(
             leaveEpochId: null,
             joinEvidenceArtifactId: member.joinEvidenceArtifactId ?? transitionEvidenceArtifactId,
             leaveEvidenceArtifactId: null,
-            metadata: {} as Prisma.InputJsonValue,
+            metadata: {},
           },
         });
         activeByActor.set(member.memberActorId, membership);
