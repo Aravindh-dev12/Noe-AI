@@ -251,3 +251,4 @@ export function getCanonicalLineageNode(lineage: readonly LineageNode[]): Lineag
 export * from './collective.js';
 export * from './selective-continuity.js';
 export * from './epistemic-diligence.js';
+export * from './decision-frontier.js';
