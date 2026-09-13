@@ -153,6 +153,7 @@ const forecastSchema = z
       'other',
     ]),
     forecasterId: z.string().min(1).max(300),
+    attestationRef: boundedRef,
     method: z.string().min(1).max(300),
     methodVersion: z.string().min(1).max(160),
     environmentStateDigest: digest,
@@ -179,7 +180,7 @@ const forecastSchema = z
             probability: probabilitySchema,
             severityScaleRef: boundedRef.optional(),
             severityLevel: z.string().min(1).max(160).optional(),
-            expectedLossMinor: z.number().finite().nonnegative().optional(),
+            expectedLossMinor: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
             evidenceRefs: z.array(boundedRef).max(128),
           })
           .strict(),
@@ -202,6 +203,7 @@ const assessmentSchema = z
     decisionId: boundedId,
     consequenceObservationRef: boundedId,
     evaluatorId: z.string().min(1).max(300),
+    attestationRef: boundedRef,
     method: z.string().min(1).max(300),
     methodVersion: z.string().min(1).max(160),
     dimension: z.enum([
