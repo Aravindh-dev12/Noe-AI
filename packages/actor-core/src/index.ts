@@ -247,3 +247,5 @@ export function getCanonicalLineageNode(lineage: readonly LineageNode[]): Lineag
   }
   return node;
 }
+
+export * from './collective.js';
