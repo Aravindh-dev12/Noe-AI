@@ -141,10 +141,7 @@ export function assertValidConsequenceReceptionRecord(record: ConsequenceRecepti
   }
 
   const effectiveAt = timestamp(record.effectiveAt, 'effectiveAt');
-  const capturedAt = timestamp(record.capturedAt, 'capturedAt');
-  if (capturedAt < effectiveAt) {
-    throw new Error('capturedAt cannot precede effectiveAt.');
-  }
+  timestamp(record.capturedAt, 'capturedAt');
   if (record.reviewAt !== undefined && timestamp(record.reviewAt, 'reviewAt') < effectiveAt) {
     throw new Error('reviewAt cannot precede effectiveAt.');
   }
@@ -197,8 +194,8 @@ export function assertValidConsequenceReceptionTransition(
   }
 
   const occurredAt = timestamp(transition.occurredAt, 'transition.occurredAt');
-  if (occurredAt < timestamp(record.effectiveAt, 'effectiveAt')) {
-    throw new Error('Transition cannot precede corrective-state effectiveness.');
+  if (occurredAt < timestamp(record.capturedAt, 'capturedAt')) {
+    throw new Error('Transition cannot precede the captured issuance record.');
   }
 }
 
