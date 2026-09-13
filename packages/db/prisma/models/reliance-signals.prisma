@@ -1,0 +1,60 @@
+// Counterparty-specific change propagation over immutable reliance provenance.
+//
+// One semantic signal exists per immutable Reliance Change Assessment. Delivery
+// transports are receipt metadata so CAEP/webhook/manual delivery cannot fork
+// the underlying institutional meaning of the signal.
+
+model RelianceSignal {
+  id                       String   @id
+  actorId                  String
+  relianceId               String
+  assessmentId             String   @unique
+  counterpartyType         String
+  counterpartyRef          String
+  relationKind             String
+  originalActorStateDigest String
+  successorStateDigest     String
+  successorLineageId       String
+  successorExecutionId     String
+  successorEventSequence   Int
+  structuralChanges        Json
+  disposition              String
+  emittedAt                DateTime
+  signalDigest             String   @unique
+  idempotencyKey           String   @unique
+  metadata                 Json     @default("{}")
+  createdAt                DateTime @default(now())
+
+  @@index([actorId, emittedAt])
+  @@index([relianceId, emittedAt])
+  @@index([counterpartyType, counterpartyRef, emittedAt])
+  @@index([disposition, emittedAt])
+}
+
+model RelianceSignalReceipt {
+  id                    String   @id
+  signalId              String
+  actorId               String
+  relianceId            String
+  kind                  String
+  partyType             String
+  partyRef              String
+  transportProfile      String?
+  transportRef          String?
+  evidenceArtifactId    String?
+  successorRelianceId   String?
+  detailDigest          String?
+  observedAt            DateTime
+  receiptDigest         String   @unique
+  idempotencyKey        String   @unique
+  metadata              Json     @default("{}")
+  createdAt             DateTime @default(now())
+
+  @@index([signalId, observedAt])
+  @@index([actorId, observedAt])
+  @@index([relianceId, observedAt])
+  @@index([kind, observedAt])
+  @@index([transportProfile, observedAt])
+  @@index([evidenceArtifactId])
+  @@index([successorRelianceId])
+}

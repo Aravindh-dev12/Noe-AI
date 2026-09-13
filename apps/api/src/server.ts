@@ -35,6 +35,7 @@ import { publicRoutes } from './routes/public.js';
 import { recognitionContinuityRoutes } from './routes/recognition-continuity.js';
 import { reliancePropagationRoutes } from './routes/reliance-propagation.js';
 import { relianceProvenanceRoutes } from './routes/reliance-provenance.js';
+import { relianceSignalRoutes } from './routes/reliance-signals.js';
 import { verificationRoutes } from './routes/verification.js';
 
 const app = Fastify({
@@ -119,6 +120,7 @@ await accountabilityRoutes(app);
 await consequenceReceptionRoutes(app);
 await relianceProvenanceRoutes(app);
 await reliancePropagationRoutes(app);
+await relianceSignalRoutes(app);
 await epistemicDiligenceRoutes(app);
 await decisionForeseeabilityRoutes(app);
 await oversightOpportunityRoutes(app);
@@ -152,7 +154,7 @@ process.on('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('SIGINT', () => void shutdown('SIGINT'));
 
 start().catch(async (error: unknown) => {
-  app.log.fatal({ err: error }, 'failed to start NOEONE API');
+  app.log.fatal({ err: error }, 'failed to start Noe API');
   await db.$disconnect();
   process.exit(1);
 });
