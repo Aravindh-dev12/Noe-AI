@@ -28,6 +28,7 @@ export type ForecastOutcome = {
   probability: ForecastProbability;
   severityScaleRef?: string;
   severityLevel?: string;
+  /** Integer minor currency units (for example cents), never a floating-point amount. */
   expectedLossMinor?: number;
   evidenceRefs: readonly string[];
 };
@@ -47,6 +48,8 @@ export type OutcomeForecastRecord = {
   horizonEndAt: string;
   sourceKind: ForecastSourceKind;
   forecasterId: string;
+  /** External or internally verifiable artifact proving who issued this forecast. */
+  attestationRef: string;
   method: string;
   methodVersion: string;
   environmentStateDigest: string;
@@ -79,6 +82,8 @@ export type ForeseeabilityAssessment = {
   decisionId: string;
   consequenceObservationRef: string;
   evaluatorId: string;
+  /** External or internally verifiable artifact proving who issued this assessment. */
+  attestationRef: string;
   method: string;
   methodVersion: string;
   dimension: ForeseeabilityDimension;
@@ -148,6 +153,7 @@ export function assertValidOutcomeForecastRecord(record: OutcomeForecastRecord):
     ['candidateId', record.candidateId],
     ['actionDigest', record.actionDigest],
     ['forecasterId', record.forecasterId],
+    ['attestationRef', record.attestationRef],
     ['method', record.method],
     ['methodVersion', record.methodVersion],
     ['environmentStateDigest', record.environmentStateDigest],
@@ -190,8 +196,10 @@ export function assertValidOutcomeForecastRecord(record: OutcomeForecastRecord):
     assertProbability(outcome.probability, `outcome.${outcome.id}.probability`);
 
     if (outcome.expectedLossMinor !== undefined) {
-      if (!Number.isFinite(outcome.expectedLossMinor) || outcome.expectedLossMinor < 0) {
-        throw new Error(`outcome.${outcome.id}.expectedLossMinor must be non-negative.`);
+      if (!Number.isSafeInteger(outcome.expectedLossMinor) || outcome.expectedLossMinor < 0) {
+        throw new Error(
+          `outcome.${outcome.id}.expectedLossMinor must be a non-negative safe integer in minor currency units.`,
+        );
       }
     }
 
@@ -241,6 +249,7 @@ export function assertValidForeseeabilityAssessment(
     ['decisionId', assessment.decisionId],
     ['consequenceObservationRef', assessment.consequenceObservationRef],
     ['evaluatorId', assessment.evaluatorId],
+    ['attestationRef', assessment.attestationRef],
     ['method', assessment.method],
     ['methodVersion', assessment.methodVersion],
     ['decisionFrontierRef', assessment.decisionFrontierRef],
