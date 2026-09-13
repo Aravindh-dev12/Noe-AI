@@ -1,209 +1,159 @@
 # NOEONE Research Frontier: Collective Action Provenance
 
-Status: next-depth research thesis, 2026-09-13
+Status: C2 implemented and production-gated, 2026-09-13
 
 ## Executive conclusion
 
 Collective continuity C1 answers:
 
-> Which changing set of members belongs to one continuing collective actor across epochs?
+> Which changing members and roles belong to one continuing collective actor across epochs?
 
-That is not enough.
+C2 answers the next question:
 
-The next institutional question is:
+> When a concrete action should be historically associated with that collective, under which exact epoch, member/role snapshot, prior decision or authority basis, and later assessment.
 
-> When a concrete action performed by one or more members should be treated as an action of the collective itself, under which governance epoch, role, authority, and decision basis.
+NOEONE calls this **Collective Action Provenance (CAP)**.
 
-Call this **Collective Action Provenance (CAP)**.
-
-NOEONE should not infer collective action merely because:
-
-- the executor was a member;
-- the executor held a role;
-- the action benefited the collective;
-- a majority of members later approved it;
-- the collective and member share a model/provider/runtime;
-- the action occurred inside a team runtime.
-
-A durable artificial institution needs a separate, inspectable bridge from member activity to collective capacity.
-
-## Why this is a distinct problem
-
-Classic multi-agent organization research already separates several forms of responsibility. Grossi, Royakkers, and Dignum formalize organizational structure using power, coordination, control, role enactment, task allocation, delegation, causal responsibility, accountability, and blameworthiness. A member can causally produce an outcome while another role remains institutionally accountable.
-
-Source:
-- Grossi, Royakkers & Dignum, *Organizational structure and responsibility* (Artificial Intelligence and Law, 2007): https://link.springer.com/article/10.1007/s10506-007-9054-0
-
-Recent AI-organization research increases the urgency. Anthropic defines an AI organization as multiple agents with differentiated roles, communication, and a shared goal, and finds that the organization can be more effective while also less aligned than a single agent. This means collective behavior cannot safely be represented as the sum of member-level attestations.
-
-Source:
-- Anthropic Alignment Science, *AI Organizations Can Be More Effective but Less Aligned than Individual Agents* (2026): https://alignment.anthropic.com/2026/ai-organizations/
-- arXiv 2604.10290
-
-The collective itself can also be behaviorally meaningful. Jørgensen, Weichwald, and Hammond model when multiple agents can be usefully abstracted as one collective agent using causal games and causal abstraction. This provides a formal reason not to assume that only individual members are real loci of agency.
-
-Source:
-- *Causal Foundations of Collective Agency* (CLeaR 2026): https://arxiv.org/abs/2605.00248
-
-ACL 2026 work on 108 LLM-agent groups further shows that composition and topology produce measurable group-level capability differences, while separate topology work shows that communication structure itself can materially change multi-agent behavior.
-
-Sources:
-- https://aclanthology.org/2026.findings-acl.624/
-- https://aclanthology.org/2026.acl-long.1764/
-- https://aclanthology.org/2026.findings-acl.207/
-
-DeepSeek's experimental Agent Teams subsystem is direct implementation prior art for durable team identity, members, tasks, and mailboxes. NOEONE therefore must not claim to invent persistent teams.
-
-Source:
-- https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/subsystems/agent-team.md
-
-## What remains open
-
-Existing team runtimes can tell us:
-
-- who was in the team;
-- who sent a message;
-- who owned a task;
-- which tool call occurred;
-- what the current topology is.
-
-That still does not answer:
-
-- Was the action personal or collective?
-- Did the member have authority to bind the collective?
-- Was a collective decision required first?
-- Was the required decision rule actually satisfied?
-- Which exact epoch and roster were operative?
-- Was the executor acting as proposer, approver, delegate, executor, monitor, or independent member?
-- If the action violated policy, is it still historically an action of the collective?
-- Can an unauthorized act later be ratified without rewriting history?
-- If a collective changes constitution tomorrow, should yesterday's action be judged under tomorrow's rules? No.
-
-This is a longitudinal capacity-attribution problem.
-
-## Core distinction
-
-NOEONE should model at least four separate facts:
+The design deliberately separates five facts:
 
 ```text
-MEMBERSHIP
-Member M belonged to Collective C during Epoch E.
-
-ROLE / AUTHORITY
-M held role R and/or grant G during Epoch E.
+COLLECTIVE EPOCH
+who belonged to the institution, under what constitution/policy
 
 DECISION
-Collective C reached decision D under Epoch E and Policy P.
+what the institution decided, when, and under which epoch
 
-ACTION CAPACITY
-Action A was performed in a claimed capacity and is linked to D/G/E.
+ACTION BINDING
+who actually acted and in what claimed capacity
+
+RATIFICATION
+whether a later institutional decision adopted an earlier action
+
+ASSESSMENT
+how a particular evaluator interprets the recorded capacity claim
 ```
 
-These must not collapse into one `collectiveAction=true` bit.
+These are not collapsed into one `collectiveAction=true` or one reputation score.
 
-## Proposed C2 primitives
+---
 
-### CollectiveDecision
+## Prior art we must not claim to have invented
 
-Immutable decision record tied to an exact collective epoch.
+### Governance snapshot and execution mechanics
 
-```text
-id
-collectiveActorId
-epochId
-decisionType
-proposalDigest
-method
-methodVersion?
-outcomeDigest
-quorumBps?
-decidedAt
-evidenceArtifactId
-basisDigest
-idempotencyKey
-metadata
-```
+OpenZeppelin Governor already models proposal, snapshot-based voting power/quorum, proposal state, optional queueing, and execution. In particular, voting power is evaluated at a historical timepoint and execution happens only after the proposal satisfies its governance rules.
 
-The `method` is descriptive and externally grounded. NOEONE does not become a universal voting engine.
+Sources:
+- https://docs.openzeppelin.com/contracts/5.x/api/governance
+- https://docs.openzeppelin.com/stellar-contracts/governance/governor
 
-Examples:
+Safe Smart Accounts already provide owner sets, thresholds, signature verification, and alternative execution paths through modules. A threshold of owners can authorize execution and the owner/threshold configuration can itself change over time.
 
-- delegated executive authority;
-- 2-of-3 threshold approval;
-- board majority;
-- unanimous member consent;
-- external legal/institutional procedure;
-- runtime-native consensus;
-- emergency controller override.
+Sources:
+- https://docs.safe.global/advanced/smart-account-concepts
+- https://docs.safe.global/advanced/smart-account-overview
 
-### CollectiveDecisionParticipation
+**NOEONE implication:** C2 is not a voting engine, multisig wallet, or generic governance runtime.
 
-Pins participation to the exact epoch roster snapshot.
+### Technical traces
 
-```text
-decisionId
-epochId
-membershipId
-memberActorId
-role
-position?
-weightBps?
-evidenceArtifactId?
-participationDigest
-```
+OpenTelemetry already standardizes operation-level traces and semantic attributes, including GenAI operation names such as agent/tool operations.
 
-Historical participation is immutable even if the member later leaves.
+Sources:
+- https://opentelemetry.io/docs/specs/semconv/how-to-write-conventions/
+- https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/
 
-### CollectiveActionBinding
+**NOEONE implication:** C2 is not another observability trace. It links technical/external actions to a continuing institutional actor and an immutable historical governance epoch.
 
-Binds an existing NOEONE action/evidence object to the capacity in which it was performed.
+### Collective agency and responsibility
 
-```text
-id
-collectiveActorId
-epochId
-memberActorId?
-membershipId?
-capacity
-sourceAuthorityExerciseId?
-sourceActorEventId?
-sourceEvidenceArtifactId
-decisionId?
-claimedAt
-bindingEvidenceArtifactId
-basisDigest
-idempotencyKey
-metadata
-```
+Recent research gives a formal reason to treat collective agency as a real analytical object. Jørgensen, Weichwald, and Hammond model when groups can be usefully abstracted as unified collective agents using causal games and causal abstraction.
 
-Initial capacity vocabulary:
+Source:
+- https://arxiv.org/abs/2605.00248
+
+Research on responsibility in multi-agent sequential decisions also finds that no single formal responsibility method consistently matches human judgments and that available information changes those judgments.
+
+Source:
+- https://arxiv.org/abs/2608.04318
+
+Anthropic's 2026 work on AI organizations further shows that multi-agent organizations can display organization-level performance/alignment properties that do not reduce cleanly to one member.
+
+Source:
+- https://alignment.anthropic.com/2026/ai-organizations/
+
+**NOEONE implication:** preserve plural evaluator assessments. Do not pretend the registry can calculate one universally correct responsibility score.
+
+---
+
+## C2 primitives implemented
+
+### `CollectiveDecision`
+
+Immutable decision tied to one exact collective epoch.
+
+Important fields include:
+
+- `collectiveActorId`
+- `epochId`
+- decision type/method/version
+- proposal and outcome digests
+- optional quorum
+- `decidedAt`
+- evidence artifact
+- exact epoch `decisionPolicyDigest`
+- exact epoch `constitutionDigest`
+- deterministic `basisDigest`
+- idempotency key
+
+The decision snapshots policy/constitution from the referenced epoch. A later policy amendment cannot rewrite it.
+
+### `CollectiveDecisionParticipation`
+
+Immutable participant snapshot:
+
+- exact decision and epoch;
+- exact `membershipId`;
+- member actor;
+- role;
+- weight;
+- optional position/evidence;
+- deterministic participation digest.
+
+A role change tomorrow does not change yesterday's decision participation.
+
+### `CollectiveActionBinding`
+
+Binds an action source to the capacity in which it is claimed to have occurred.
+
+C2 supports four distinct historical capacity claims:
 
 - `COLLECTIVE_DIRECT`
 - `MEMBER_ON_BEHALF`
 - `MEMBER_PERSONAL`
 - `UNAUTHORIZED_COLLECTIVE_CLAIM`
-- `RATIFIED_AFTER_ACTION`
-- `DISPUTED`
 
-The vocabulary is historical provenance, not a moral verdict.
+Action sources can currently be:
 
-### CollectiveCapacityAssessment
+- `AUTHORITY_EXERCISE`
+- `ACTOR_EVENT`
+- `EVIDENCE_ARTIFACT`
 
-Plural evaluator-specific assessment of whether the recorded action satisfied a particular capacity rule.
+The binding stores `actedAt` separately from `claimedAt`.
 
-```text
-id
-actionBindingId
-evaluatorRef
-method
-methodVersion
-disposition
-basisDigest
-evidenceArtifactId
-assessedAt
-```
+### `CollectiveActionRatification`
 
-Suggested dispositions:
+Ratification is a separate immutable record.
+
+This is intentionally **not** an action-capacity value. A later approval cannot mutate an earlier unauthorized claim into an action that was authorized beforehand.
+
+The original action remains what it was; the later institutional decision becomes a new historical fact.
+
+### `CollectiveCapacityAssessment`
+
+Plural evaluator-specific interpretation of an action binding.
+
+Dispositions:
 
 - `SUPPORTED`
 - `NOT_SUPPORTED`
@@ -211,175 +161,124 @@ Suggested dispositions:
 - `INDETERMINATE`
 - `DISPUTED`
 
-NOEONE must preserve disagreement.
+Two evaluators can disagree without either row overwriting the other.
 
-## Critical invariants
+---
 
-### 1. Membership is necessary but not sufficient
+## Database trust boundary
 
-`MEMBER_ON_BEHALF` requires membership active at action time and pinned to the exact operative epoch.
+C2 treats PostgreSQL constraints/triggers as part of the trust boundary rather than relying only on API validation.
 
-### 2. Time is part of the proof
+The migration enforces:
 
-The action is evaluated against the epoch, role, decision policy, and authority state that existed at `actedAt`, not today's state.
+1. C2 history rows are append-only.
+2. A decision must reference the exact collective epoch.
+3. `decidedAt` must fall inside that epoch.
+4. Decision policy and constitution digests must match that epoch exactly.
+5. Participation must copy an existing immutable epoch-membership snapshot.
+6. `actedAt` must fall inside the claimed epoch.
+7. Member-capacity actions require the exact membership snapshot from that epoch.
+8. A pre-authorizing decision must belong to the same collective and epoch.
+9. A decision made after an action cannot be used as prior authorization.
+10. Actor-event/authority-exercise sources must identify the claimed executing actor and the same action time.
+11. Ratification must point to a later decision belonging to the same collective.
+12. Capacity assessments are append-only and evaluator-specific.
 
-### 3. Decision evidence never rewrites the action
+The application layer additionally computes deterministic versioned SHA-256 basis digests over the full referenced state/evidence.
 
-If a decision is missing, the action remains historically missing that basis. Later ratification becomes a new object linked to the original action.
+---
 
-### 4. Personal and collective capacities can coexist
+## Canonical event integration
 
-A member may act personally while being a member of the collective. NOEONE must allow explicit `MEMBER_PERSONAL` records.
+The C2 service writes normal NOEONE actor-history events:
 
-### 5. Collective attribution does not erase member attribution
+- `collective.decision.recorded`
+- `collective.action.bound`
+- `collective.action.ratified`
+- `collective.capacity.assessed`
 
-The existing consequence graph can contain both collective and member-level causal/responsibility assessments.
+That means collective decision/action history is part of the same persistent actor timeline rather than a disconnected governance database.
 
-### 6. A decision cannot use a future roster
+---
 
-Every participant must resolve to an immutable `CollectiveEpochMembership` snapshot from the same epoch.
+## API surface
 
-### 7. Governance transitions do not retroactively change validity
+Privileged writes:
 
-Constitution or policy amendments apply only to later decisions/actions unless an external institution explicitly supplies retrospective semantics as separate evidence.
+- `POST /v1/collective-decisions`
+- `POST /v1/collective-actions`
+- `POST /v1/collective-actions/:bindingId/ratifications`
+- `POST /v1/collective-actions/:bindingId/assessments`
 
-### 8. Ratification is explicit
+Public reads:
 
-`RATIFIED_AFTER_ACTION` must point to the original binding and a later valid decision. It cannot mutate the earlier record into `MEMBER_ON_BEHALF`.
+- `GET /v1/collectives/:handle/action-provenance`
+- `GET /v1/collectives/:handle/action-provenance/verify`
 
-### 9. No universal capacity truth
+The public representation exposes structural provenance while withholding private evidence IDs, raw metadata, source references, and participant positions where they are not needed for public career/history views.
 
-NOEONE can enforce internal structural invariants, but external legal/institutional capacity can differ by jurisdiction and counterparty. Preserve evaluator context.
+---
 
-## Why this is stronger than a team audit log
+## Adversarial tests implemented
 
-A normal team log says:
+The production integration test verifies:
 
-```text
-member-7 called tool-X at 14:03
-```
+- decision participant snapshots survive later role changes;
+- idempotent decision replay;
+- member-on-behalf attribution preserves both collective and member identity;
+- a future decision cannot authorize an earlier action;
+- member-personal and unauthorized claims remain distinct;
+- roster/role epoch transition does not rewrite earlier history;
+- later ratification is a new record, not a mutation;
+- conflicting external capacity assessments coexist;
+- direct mutation of historical action binding is rejected;
+- deterministic end-to-end verification of the provenance graph succeeds.
 
-NOEONE should be able to reconstruct:
+---
 
-```text
-Collective C
-  Epoch 14
-  Constitution digest K
-  Decision policy P
-      -> Decision D approved by roles A/B
-      -> Member M held role R
-      -> Authority grant G covered action class X
-      -> Execution E performed action A
-      -> Host/evidence recorded outcome O
-      -> Later evaluators disagree on causal responsibility
-```
+## Exact novelty claim
 
-That is an institutional history, not an orchestration trace.
+Do not claim:
 
-## Relationship to existing NOEONE domains
+> NOEONE invented governance, multisig authorization, ratification, tracing, collective agency, or responsibility attribution.
 
-Do not duplicate existing machinery.
+Those ingredients predate this system.
 
-- actor continuity: identifies the continuing collective actor;
-- collective C1: identifies exact membership/role epochs;
-- delegated authority: carries grants and delegation chains;
-- intent continuity: links mandates/transforms/assessments;
-- evidence graph: stores external proofs/assertions;
-- consequence graph: stores observations and plural attributions;
-- recognition continuity: records contextual recognition;
-- institutional succession: transfers specific positions explicitly;
-- actor resolution: handles terminal/failure cases.
+The narrower hypothesis is:
 
-CAP is the binding layer that answers:
+> **NOEONE can become the longitudinal institutional-attribution layer that binds collective decisions, member execution, later ratification, and plural capacity assessments to immutable collective identity epochs across member/model/runtime turnover.**
 
-> In what capacity did this actor/member act at that time?
+We have not found a mature cross-host product/standard whose primary object is that complete longitudinal graph. That remains a hypothesis to keep falsifying as standards evolve.
 
-## Experimental program
+---
 
-### Experiment A: same action, different capacity
+## Why this matters to the 2050 thesis
 
-Keep action content identical. Vary whether the executor is:
+If models become cheap, interchangeable, or superhuman, organizations do not stop needing history.
 
-1. not a member;
-2. a member acting personally;
-3. a member with role but no authority;
-4. an authorized delegate;
-5. an authorized delegate after required collective approval.
+They still need to answer:
 
-Measure human/institutional judgments of whether the collective itself acted.
-
-### Experiment B: approval timing
-
-Compare:
-
-- valid approval before action;
-- approval after action;
-- rejected proposal followed by action;
-- emergency authority followed by later review.
-
-The registry should preserve these histories without normalizing them into one status.
-
-### Experiment C: topology and responsibility
-
-Use the same roster but vary flat, hierarchical, hub-and-spoke, and committee topologies. Record proposer/approver/executor/control roles and compare responsibility attribution.
-
-### Experiment D: total roster turnover
-
-Repeat equivalent decisions across epochs while replacing all members over time. Test whether counterparties continue treating the collective, rather than the current roster, as the responsible actor.
-
-### Experiment E: collective-vs-member consequence attribution
-
-Create tasks where one member proposes, another approves, another executes, and the collective policy made the action possible. Ask independent evaluators to distribute causal, contractual, supervisory, and moral responsibility. Preserve disagreement.
-
-## Falsification / prior-art boundary
-
-This direction weakens if a broadly adopted standard or product already provides all of the following as one longitudinal object:
-
-1. persistent collective identity across roster/topology changes;
-2. epoch-pinned membership/roles;
-3. governance-decision provenance;
-4. capacity binding from member action to collective action;
-5. external evidence and plural assessment;
-6. consequence attribution without collapsing collective/member responsibility;
-7. continuity across model/runtime/provider changes.
-
-Current research covers many ingredients separately. We have not found a mature cross-host product/standard whose primary object is this full longitudinal collective-capacity graph.
-
-## Product implication
-
-For consumers the surface remains simple:
-
-```text
-TEAM NORTH approved the move.
-Member Nova executed it.
-The team later changed roster.
-The decision and consequence still belong to TEAM NORTH's history.
-```
-
-For researchers and institutions the same event exposes:
-
-- exact epoch;
-- roster snapshot;
-- governance basis;
-- decision evidence;
-- authority chain;
-- execution identity;
-- host evidence;
-- later consequence/attribution assessments.
-
-This is a strong Olam-style dual loop: simple public team careers above, unusually rich collective-agency data below.
-
-## Long-term thesis
-
-If individual cognition becomes cheap or superhuman, organizational questions do not disappear.
-
-They become harder:
-
-- who could bind the institution;
-- which group actually decided;
-- which member executed;
+- which institution existed at the time;
+- which roster/roles were operative;
 - which policy applied;
-- whether later member/model turnover preserves the institution;
-- which consequences remain attached to the collective.
+- what decision existed before execution;
+- which member or collective endpoint acted;
+- whether adoption happened only later;
+- which evaluators/counterparties recognize the capacity claim;
+- which consequences subsequently attach.
 
-NOEONE's durable object is therefore not merely an AI identity. It is the **longitudinal institutional actor**, whether that actor is implemented by one changing system or by a changing collective of systems.
+That pushes NOEONE beyond "persistent AI memory" toward a persistent **institutional actor record**.
+
+---
+
+## Next frontier: C3
+
+C2 deliberately stops at action provenance. It does not yet solve collective reorganization.
+
+The next research problem is:
+
+> When a collective splits, merges, dissolves, or is substantially reconstituted, which open obligations, claims, permissions, liabilities, and action histories follow which successor institutions?
+
+NOEONE already has institutional-succession primitives for object-specific transfer between distinct actors. C3 should not duplicate them. The new work should connect collective epoch/reorganization evidence to those existing succession objects and preserve ambiguity when multiple successors inherit different parts of the institution.
+
+See `RESEARCH-COLLECTIVE-REORGANIZATION-C3.md`.
