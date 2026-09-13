@@ -79,7 +79,7 @@ afterAll(async () => {
 });
 
 describe('reliance signal propagation', () => {
-  it('preserves change propagation, response attribution, renewal, and blast radius', async () => {
+  it('keeps one semantic signal across transports and preserves renewal provenance', async () => {
     const basisEvidence = await registerEvidenceReference(
       {
         actorId,
@@ -169,8 +169,6 @@ describe('reliance signal propagation', () => {
     const emitted = await emitRelianceSignal(
       {
         assessmentId: assessment.assessment.id,
-        transportProfile: 'ssf',
-        transportRef: `stream:${suffix}`,
         emittedAt: future(13),
         idempotencyKey: `reliance-signal-${suffix}`,
       },
@@ -185,8 +183,6 @@ describe('reliance signal propagation', () => {
     const replay = await emitRelianceSignal(
       {
         assessmentId: assessment.assessment.id,
-        transportProfile: 'ssf',
-        transportRef: `stream:${suffix}`,
         emittedAt: future(13),
         idempotencyKey: `reliance-signal-${suffix}`,
       },
@@ -199,14 +195,12 @@ describe('reliance signal propagation', () => {
       emitRelianceSignal(
         {
           assessmentId: assessment.assessment.id,
-          transportProfile: 'webhook',
-          transportRef: `different:${suffix}`,
           emittedAt: future(13),
-          idempotencyKey: `reliance-signal-${suffix}`,
+          idempotencyKey: `second-signal-${suffix}`,
         },
         registry,
       ),
-    ).rejects.toThrow(/conflicting data/i);
+    ).rejects.toThrow(/already has signal/i);
 
     const deliveryEvidence = await registerEvidenceReference(
       {
@@ -221,12 +215,29 @@ describe('reliance signal propagation', () => {
       registry,
     );
 
+    await expect(
+      recordRelianceSignalReceipt(
+        {
+          signalId: emitted.signal.id,
+          kind: 'delivered',
+          partyType: 'transport',
+          partyRef: `ssf:${suffix}`,
+          evidenceArtifactId: deliveryEvidence.artifact.id,
+          observedAt: future(15),
+          idempotencyKey: `missing-transport-${suffix}`,
+        },
+        registry,
+      ),
+    ).rejects.toThrow(/transportProfile/i);
+
     const delivered = await recordRelianceSignalReceipt(
       {
         signalId: emitted.signal.id,
         kind: 'delivered',
         partyType: 'transport',
         partyRef: `ssf:${suffix}`,
+        transportProfile: 'ssf',
+        transportRef: `stream:${suffix}`,
         evidenceArtifactId: deliveryEvidence.artifact.id,
         observedAt: future(15),
         idempotencyKey: `signal-delivered-${suffix}`,
@@ -234,6 +245,7 @@ describe('reliance signal propagation', () => {
       registry,
     );
     expect(delivered.replayed).toBe(false);
+    expect(delivered.receipt.transportProfile).toBe('SSF');
 
     let snapshot = await getActorRelianceBlastRadius(actorId);
     expect(snapshot.propagation.delivered).toBe(1);
@@ -385,6 +397,7 @@ describe('reliance signal propagation', () => {
       'acknowledged',
       'reliance-renewed',
     ]);
+    expect(receipts[0]?.transportProfile).toBe('ssf');
 
     const signals = await getRelianceSignals(actorId);
     expect(signals).toHaveLength(1);
@@ -392,6 +405,7 @@ describe('reliance signal propagation', () => {
     expect(signals[0]?.projection.terminal).toBe('renewed');
 
     snapshot = await getActorRelianceBlastRadius(actorId);
+    expect(snapshot.signalCount).toBe(1);
     expect(snapshot.propagation.renewed).toBe(1);
     expect(snapshot.propagation.unresolved).toBe(0);
 
@@ -404,7 +418,7 @@ describe('reliance signal propagation', () => {
     await expect(
       db.relianceSignal.update({
         where: { id: emitted.signal.id },
-        data: { transportRef: 'tampered' },
+        data: { emittedAt: future(99) },
       }),
     ).rejects.toThrow(/append-only/i);
   });
