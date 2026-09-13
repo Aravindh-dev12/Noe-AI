@@ -10,6 +10,7 @@ import { z } from 'zod';
 
 import { env } from '../env.js';
 import { assertAdmin } from '../lib/auth.js';
+import { jsonMetadataSchema } from '../lib/json.js';
 
 const boundedId = z.string().min(1).max(240);
 const digest = z.string().regex(/^sha256:[a-f0-9]{64}$/);
@@ -44,7 +45,7 @@ const issueSchema = z
     issuedByRef: z.string().min(1).max(800),
     authorityEvidenceArtifactId: boundedId,
     idempotencyKey: z.string().min(8).max(500),
-    metadata: z.record(z.string(), z.unknown()).optional(),
+    metadata: jsonMetadataSchema,
   })
   .strict();
 
@@ -58,7 +59,7 @@ const transitionSchema = z
     occurredAt: timestamp,
     reason: z.string().max(2000).nullish(),
     idempotencyKey: z.string().min(8).max(500),
-    metadata: z.record(z.string(), z.unknown()).optional(),
+    metadata: jsonMetadataSchema,
   })
   .strict();
 
@@ -150,7 +151,11 @@ export async function consequenceReceptionRoutes(app: FastifyInstance) {
     if (query.activeOnly) {
       const at = query.at ? new Date(query.at) : new Date();
       const data = await activeConsequenceReceptionsAt(params.actorId, at);
-      return { version: 'noeone.consequence-reception-list.v1', at, data: data.slice(0, query.limit) };
+      return {
+        version: 'noeone.consequence-reception-list.v1',
+        at,
+        data: data.slice(0, query.limit),
+      };
     }
 
     const data = await db.consequenceReception.findMany({
