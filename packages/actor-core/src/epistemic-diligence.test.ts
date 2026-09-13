@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import { describe, expect, it } from 'vitest';
 
 import {
   assertValidDecisionInquiryRecord,
@@ -78,192 +77,188 @@ function baseRecord(): DecisionInquiryRecord {
   };
 }
 
-test('completed authoritative verification satisfies the requirement', () => {
-  const record = baseRecord();
-  assertValidDecisionInquiryRecord(record);
+describe('epistemic diligence evidence', () => {
+  it('treats completed authoritative verification as satisfying the requirement', () => {
+    const record = baseRecord();
+    expect(() => assertValidDecisionInquiryRecord(record)).not.toThrow();
 
-  const coverage = deriveDecisionInquiryCoverage(record);
-  assert.equal(coverage.mandatorySatisfied, 1);
-  assert.equal(coverage.mandatoryTotal, 1);
-  assert.equal(coverage.hasMissedAvailableCheck, false);
-  assert.equal(coverage.requirements[0]?.disposition, 'satisfied');
-});
+    const coverage = deriveDecisionInquiryCoverage(record);
+    expect(coverage.mandatorySatisfied).toBe(1);
+    expect(coverage.mandatoryTotal).toBe(1);
+    expect(coverage.hasMissedAvailableCheck).toBe(false);
+    expect(coverage.requirements[0]?.disposition).toBe('satisfied');
+  });
 
-test('available but skipped verification is distinguished from an unavoidable information gap', () => {
-  const skipped: DecisionInquiryRecord = {
-    ...baseRecord(),
-    attempts: [
-      {
-        id: 'attempt_skip',
-        requirementId: requirement.id,
-        opportunityId: 'opp_bank_verify',
-        outcome: 'skipped',
-        startedAt: '2026-09-13T09:59:52.000Z',
-        evidenceRefs: [],
-        reasonCode: 'agent-chose-not-to-query',
-      },
-    ],
-    evidenceUsed: [],
-  };
+  it('distinguishes available-but-skipped verification from an attested information gap', () => {
+    const skipped: DecisionInquiryRecord = {
+      ...baseRecord(),
+      attempts: [
+        {
+          id: 'attempt_skip',
+          requirementId: requirement.id,
+          opportunityId: 'opp_bank_verify',
+          outcome: 'skipped',
+          startedAt: '2026-09-13T09:59:52.000Z',
+          evidenceRefs: [],
+          reasonCode: 'agent-chose-not-to-query',
+        },
+      ],
+      evidenceUsed: [],
+    };
 
-  const unavailable: DecisionInquiryRecord = {
-    ...baseRecord(),
-    id: 'inq_2',
-    opportunities: [
-      {
-        ...baseRecord().opportunities[0]!,
-        status: 'unavailable',
-        constraintCode: 'provider-outage',
-      },
-    ],
-    attempts: [],
-    evidenceUsed: [],
-  };
+    const unavailable: DecisionInquiryRecord = {
+      ...baseRecord(),
+      id: 'inq_2',
+      opportunities: [
+        {
+          ...baseRecord().opportunities[0]!,
+          status: 'unavailable',
+          constraintCode: 'provider-outage',
+        },
+      ],
+      attempts: [],
+      evidenceUsed: [],
+    };
 
-  assert.equal(
-    classifyRequirementCoverage(skipped, requirement).disposition,
-    'missed-available-check',
-  );
-  assert.equal(
-    classifyRequirementCoverage(unavailable, requirement).disposition,
-    'attested-unavailable',
-  );
-});
+    expect(classifyRequirementCoverage(skipped, requirement).disposition).toBe(
+      'missed-available-check',
+    );
+    expect(classifyRequirementCoverage(unavailable, requirement).disposition).toBe(
+      'attested-unavailable',
+    );
+  });
 
-test('agent self-report does not establish a runtime-attested verification opportunity when policy excludes it', () => {
-  const record: DecisionInquiryRecord = {
-    ...baseRecord(),
-    opportunities: [
-      {
-        ...baseRecord().opportunities[0]!,
-        attestor: 'agent-self-report',
-      },
-    ],
-    attempts: [],
-    evidenceUsed: [],
-  };
+  it('does not treat excluded agent self-report as an attested verification opportunity', () => {
+    const record: DecisionInquiryRecord = {
+      ...baseRecord(),
+      opportunities: [
+        {
+          ...baseRecord().opportunities[0]!,
+          attestor: 'agent-self-report',
+        },
+      ],
+      attempts: [],
+      evidenceUsed: [],
+    };
 
-  const coverage = classifyRequirementCoverage(record, requirement);
-  assert.equal(coverage.disposition, 'indeterminate');
-  assert.deepEqual(coverage.matchedOpportunityIds, []);
-});
+    const coverage = classifyRequirementCoverage(record, requirement);
+    expect(coverage.disposition).toBe('indeterminate');
+    expect(coverage.matchedOpportunityIds).toEqual([]);
+  });
 
-test('failed use of an available verifier is different from never trying it', () => {
-  const record: DecisionInquiryRecord = {
-    ...baseRecord(),
-    attempts: [
-      {
-        id: 'attempt_failed',
-        requirementId: requirement.id,
-        opportunityId: 'opp_bank_verify',
-        outcome: 'failed',
-        startedAt: '2026-09-13T09:59:52.000Z',
-        finishedAt: '2026-09-13T09:59:54.000Z',
-        evidenceRefs: [],
-        reasonCode: 'upstream-500',
-      },
-    ],
-    evidenceUsed: [],
-  };
+  it('distinguishes failed use of an available verifier from never trying it', () => {
+    const record: DecisionInquiryRecord = {
+      ...baseRecord(),
+      attempts: [
+        {
+          id: 'attempt_failed',
+          requirementId: requirement.id,
+          opportunityId: 'opp_bank_verify',
+          outcome: 'failed',
+          startedAt: '2026-09-13T09:59:52.000Z',
+          finishedAt: '2026-09-13T09:59:54.000Z',
+          evidenceRefs: [],
+          reasonCode: 'upstream-500',
+        },
+      ],
+      evidenceUsed: [],
+    };
 
-  const coverage = deriveDecisionInquiryCoverage(record);
-  assert.equal(coverage.requirements[0]?.disposition, 'attempted-but-unresolved');
-  assert.equal(coverage.hasMissedAvailableCheck, false);
-});
+    const coverage = deriveDecisionInquiryCoverage(record);
+    expect(coverage.requirements[0]?.disposition).toBe('attempted-but-unresolved');
+    expect(coverage.hasMissedAvailableCheck).toBe(false);
+  });
 
-test('unknown opportunity state remains indeterminate rather than becoming a negligence inference', () => {
-  const record: DecisionInquiryRecord = {
-    ...baseRecord(),
-    opportunities: [
-      {
-        ...baseRecord().opportunities[0]!,
-        status: 'unknown',
-      },
-    ],
-    attempts: [],
-    evidenceUsed: [],
-  };
+  it('keeps unknown opportunity state indeterminate instead of inferring negligence', () => {
+    const record: DecisionInquiryRecord = {
+      ...baseRecord(),
+      opportunities: [
+        {
+          ...baseRecord().opportunities[0]!,
+          status: 'unknown',
+        },
+      ],
+      attempts: [],
+      evidenceUsed: [],
+    };
 
-  assert.equal(
-    classifyRequirementCoverage(record, requirement).disposition,
-    'indeterminate',
-  );
-});
+    expect(classifyRequirementCoverage(record, requirement).disposition).toBe('indeterminate');
+  });
 
-test('completed attempts must be backed by referenced evidence', () => {
-  const record: DecisionInquiryRecord = {
-    ...baseRecord(),
-    attempts: [
-      {
-        ...baseRecord().attempts[0]!,
-        evidenceRefs: [],
-      },
-    ],
-    evidenceUsed: [],
-  };
+  it('requires evidence for completed verification attempts', () => {
+    const record: DecisionInquiryRecord = {
+      ...baseRecord(),
+      attempts: [
+        {
+          ...baseRecord().attempts[0]!,
+          evidenceRefs: [],
+        },
+      ],
+      evidenceUsed: [],
+    };
 
-  assert.throws(
-    () => assertValidDecisionInquiryRecord(record),
-    /Completed attempt attempt_bank_verify must reference evidence/,
-  );
-});
+    expect(() => assertValidDecisionInquiryRecord(record)).toThrow(
+      /Completed attempt attempt_bank_verify must reference evidence/,
+    );
+  });
 
-test('attempts cannot fabricate unknown requirements or opportunities', () => {
-  const unknownRequirement: DecisionInquiryRecord = {
-    ...baseRecord(),
-    attempts: [
-      {
-        ...baseRecord().attempts[0]!,
-        requirementId: 'req_unknown',
-      },
-    ],
-  };
-  assert.throws(
-    () => assertValidDecisionInquiryRecord(unknownRequirement),
-    /references unknown requirement/,
-  );
+  it('rejects attempts that fabricate unknown requirements or opportunities', () => {
+    const unknownRequirement: DecisionInquiryRecord = {
+      ...baseRecord(),
+      attempts: [
+        {
+          ...baseRecord().attempts[0]!,
+          requirementId: 'req_unknown',
+        },
+      ],
+    };
+    expect(() => assertValidDecisionInquiryRecord(unknownRequirement)).toThrow(
+      /references unknown requirement/,
+    );
 
-  const unknownOpportunity: DecisionInquiryRecord = {
-    ...baseRecord(),
-    attempts: [
-      {
-        ...baseRecord().attempts[0]!,
-        opportunityId: 'opp_unknown',
-      },
-    ],
-  };
-  assert.throws(
-    () => assertValidDecisionInquiryRecord(unknownOpportunity),
-    /references unknown opportunity/,
-  );
-});
+    const unknownOpportunity: DecisionInquiryRecord = {
+      ...baseRecord(),
+      attempts: [
+        {
+          ...baseRecord().attempts[0]!,
+          opportunityId: 'opp_unknown',
+        },
+      ],
+    };
+    expect(() => assertValidDecisionInquiryRecord(unknownOpportunity)).toThrow(
+      /references unknown opportunity/,
+    );
+  });
 
-test('independent evaluators may reach different diligence assessments without rewriting the record', () => {
-  const record = baseRecord();
+  it('allows independent evaluators to disagree without rewriting the record', () => {
+    const record = baseRecord();
 
-  const strictAssessment = {
-    version: 'noeone.epistemic-diligence-assessment.v1' as const,
-    id: 'assessment_strict',
-    decisionInquiryRecordId: record.id,
-    evaluatorId: 'insurer-a',
-    policyId: 'insurer-a-vetting',
-    policyVersion: '1',
-    disposition: 'insufficient' as const,
-    assessedAt: '2026-09-13T11:00:00.000Z',
-    evidenceRefs: [record.evidenceBundleRef],
-    rationaleCode: 'human-review-required',
-  };
+    const strictAssessment = {
+      version: 'noeone.epistemic-diligence-assessment.v1' as const,
+      id: 'assessment_strict',
+      decisionInquiryRecordId: record.id,
+      evaluatorId: 'insurer-a',
+      policyId: 'insurer-a-vetting',
+      policyVersion: '1',
+      disposition: 'insufficient' as const,
+      assessedAt: '2026-09-13T11:00:00.000Z',
+      evidenceRefs: [record.evidenceBundleRef],
+      rationaleCode: 'human-review-required',
+    };
 
-  const permissiveAssessment = {
-    ...strictAssessment,
-    id: 'assessment_permissive',
-    evaluatorId: 'host-b',
-    policyId: 'host-b-vetting',
-    disposition: 'sufficient' as const,
-    rationaleCode: 'authoritative-check-satisfied',
-  };
+    const permissiveAssessment = {
+      ...strictAssessment,
+      id: 'assessment_permissive',
+      evaluatorId: 'host-b',
+      policyId: 'host-b-vetting',
+      disposition: 'sufficient' as const,
+      rationaleCode: 'authoritative-check-satisfied',
+    };
 
-  assert.doesNotThrow(() => assertValidEpistemicDiligenceAssessment(strictAssessment, record));
-  assert.doesNotThrow(() => assertValidEpistemicDiligenceAssessment(permissiveAssessment, record));
-  assert.equal(record.id, 'inq_1');
+    expect(() => assertValidEpistemicDiligenceAssessment(strictAssessment, record)).not.toThrow();
+    expect(() =>
+      assertValidEpistemicDiligenceAssessment(permissiveAssessment, record),
+    ).not.toThrow();
+    expect(record.id).toBe('inq_1');
+  });
 });
