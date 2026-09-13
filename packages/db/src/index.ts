@@ -21,6 +21,7 @@ export * from './authority.js';
 export * from './temporal-authority.js';
 export * from './accountability.js';
 export * from './consequence-reception.js';
+export * from './reliance-provenance.js';
 export * from './dependency-exposure.js';
 export * from './dependency-impact.js';
 export * from './control-continuity.js';
