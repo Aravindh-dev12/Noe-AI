@@ -1,4 +1,5 @@
 const API_URL =
+  process.env.NOE_API_URL ??
   process.env.NOEONE_API_URL ??
   process.env.ONBAE_API_URL ??
   process.env.NEXT_PUBLIC_API_URL ??
@@ -86,6 +87,8 @@ export type ActorProfile = {
   }>;
 };
 
+// Protocol versions are historical compatibility identifiers. Public brand changes
+// do not rewrite already-issued signed records.
 export type ActorVerification = {
   verificationVersion: 'noeone.verify.v1';
   actorId: string;
@@ -162,7 +165,7 @@ async function apiGet<T>(path: string): Promise<T> {
   });
 
   if (!response.ok) {
-    throw new Error(`NOEONE API ${response.status} for ${path}`);
+    throw new Error(`NOE API ${response.status} for ${path}`);
   }
 
   return (await response.json()) as T;
