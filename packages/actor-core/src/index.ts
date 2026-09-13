@@ -252,3 +252,4 @@ export * from './collective.js';
 export * from './selective-continuity.js';
 export * from './epistemic-diligence.js';
 export * from './decision-frontier.js';
+export * from './foreseeability-provenance.js';

@@ -18,6 +18,7 @@ import { collectiveActionProvenanceRoutes } from './routes/collective-action-pro
 import { collectiveRoutes } from './routes/collectives.js';
 import { continuityRoutes } from './routes/continuity.js';
 import { controlContinuityRoutes } from './routes/control-continuity.js';
+import { decisionForeseeabilityRoutes } from './routes/decision-foreseeability.js';
 import { dependencyImpactRoutes } from './routes/dependency-impact.js';
 import { dependencyRoutes } from './routes/dependencies.js';
 import { epistemicDiligenceRoutes } from './routes/epistemic-diligence.js';
@@ -112,6 +113,7 @@ await intentContinuityRoutes(app);
 await capabilityContinuityRoutes(app);
 await accountabilityRoutes(app);
 await epistemicDiligenceRoutes(app);
+await decisionForeseeabilityRoutes(app);
 await dependencyRoutes(app);
 await dependencyImpactRoutes(app);
 await actorResolutionRoutes(app);

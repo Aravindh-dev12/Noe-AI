@@ -34,4 +34,5 @@ export * from './actor-resolution-operations.js';
 export * from './collective-continuity.js';
 export * from './collective-action-provenance.js';
 export * from './epistemic-diligence.js';
+export * from './decision-foreseeability.js';
 export * from '@prisma/client';
