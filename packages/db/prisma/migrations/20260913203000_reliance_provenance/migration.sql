@@ -58,6 +58,15 @@ CREATE TABLE "RelianceChangeAssessment" (
     "actorId" TEXT NOT NULL,
     "successorLineageId" TEXT NOT NULL,
     "successorExecutionId" TEXT NOT NULL,
+    "successorExecutionConfigHash" TEXT NOT NULL,
+    "successorActorOwnerId" TEXT,
+    "successorEventSequence" INTEGER NOT NULL,
+    "successorDisclosureBundleDigest" TEXT NOT NULL,
+    "successorCapabilitySnapshotDigest" TEXT,
+    "successorAuthoritySnapshotDigest" TEXT,
+    "successorControlSnapshotDigest" TEXT,
+    "successorCorrectiveStateDigest" TEXT,
+    "successorDependencySnapshotDigest" TEXT,
     "successorStateDigest" TEXT NOT NULL,
     "structuralChanges" JSONB NOT NULL,
     "disposition" TEXT NOT NULL,
@@ -77,8 +86,16 @@ CREATE TABLE "RelianceChangeAssessment" (
     CONSTRAINT "RelianceChangeAssessment_disposition_check" CHECK (
       "disposition" IN ('UNAFFECTED','REVIEW_REQUIRED','INVALIDATED','DISPUTED')
     ),
+    CONSTRAINT "RelianceChangeAssessment_sequence_check" CHECK ("successorEventSequence" >= 0),
+    CONSTRAINT "RelianceChangeAssessment_execution_hash_check" CHECK ("successorExecutionConfigHash" ~ '^sha256:[0-9a-f]{64}$'),
+    CONSTRAINT "RelianceChangeAssessment_disclosure_hash_check" CHECK ("successorDisclosureBundleDigest" ~ '^sha256:[0-9a-f]{64}$'),
     CONSTRAINT "RelianceChangeAssessment_successor_hash_check" CHECK ("successorStateDigest" ~ '^sha256:[0-9a-f]{64}$'),
     CONSTRAINT "RelianceChangeAssessment_basis_hash_check" CHECK ("basisDigest" ~ '^sha256:[0-9a-f]{64}$'),
+    CONSTRAINT "RelianceChangeAssessment_capability_hash_check" CHECK ("successorCapabilitySnapshotDigest" IS NULL OR "successorCapabilitySnapshotDigest" ~ '^sha256:[0-9a-f]{64}$'),
+    CONSTRAINT "RelianceChangeAssessment_authority_hash_check" CHECK ("successorAuthoritySnapshotDigest" IS NULL OR "successorAuthoritySnapshotDigest" ~ '^sha256:[0-9a-f]{64}$'),
+    CONSTRAINT "RelianceChangeAssessment_control_hash_check" CHECK ("successorControlSnapshotDigest" IS NULL OR "successorControlSnapshotDigest" ~ '^sha256:[0-9a-f]{64}$'),
+    CONSTRAINT "RelianceChangeAssessment_corrective_hash_check" CHECK ("successorCorrectiveStateDigest" IS NULL OR "successorCorrectiveStateDigest" ~ '^sha256:[0-9a-f]{64}$'),
+    CONSTRAINT "RelianceChangeAssessment_dependency_hash_check" CHECK ("successorDependencySnapshotDigest" IS NULL OR "successorDependencySnapshotDigest" ~ '^sha256:[0-9a-f]{64}$'),
     CONSTRAINT "RelianceChangeAssessment_changes_shape_check" CHECK (jsonb_typeof("structuralChanges") = 'array')
 );
 
@@ -138,62 +155,43 @@ BEGIN
   WHERE "id" = NEW."actorId"
   FOR UPDATE;
 
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'reliance actor not found';
-  END IF;
+  IF NOT FOUND THEN RAISE EXCEPTION 'reliance actor not found'; END IF;
 
   IF current_actor."canonicalLineageId" <> NEW."lineageId" THEN
     RAISE EXCEPTION 'reliance must bind the current canonical lineage head';
   END IF;
-
   IF current_actor."ownerId" IS DISTINCT FROM NEW."actorOwnerId" THEN
     RAISE EXCEPTION 'reliance owner snapshot does not match actor owner';
   END IF;
 
-  SELECT * INTO current_execution
-  FROM "ActorExecution"
-  WHERE "id" = NEW."executionId";
-
+  SELECT * INTO current_execution FROM "ActorExecution" WHERE "id" = NEW."executionId";
   IF NOT FOUND OR current_execution."actorId" <> NEW."actorId" OR current_execution."endedAt" IS NOT NULL THEN
     RAISE EXCEPTION 'reliance must bind the actor current live execution';
   END IF;
-
   IF current_execution."configHash" <> NEW."executionConfigHash" THEN
     RAISE EXCEPTION 'reliance execution config hash mismatch';
   END IF;
 
-  SELECT * INTO current_lineage
-  FROM "LineageNode"
-  WHERE "id" = NEW."lineageId";
-
+  SELECT * INTO current_lineage FROM "LineageNode" WHERE "id" = NEW."lineageId";
   IF NOT FOUND OR current_lineage."actorId" <> NEW."actorId" OR current_lineage."canonical" IS NOT TRUE THEN
     RAISE EXCEPTION 'reliance lineage is not the actor canonical lineage';
   END IF;
 
   SELECT COALESCE(MAX("sequence"), 0) INTO current_sequence
-  FROM "ActorEvent"
-  WHERE "actorId" = NEW."actorId";
-
+  FROM "ActorEvent" WHERE "actorId" = NEW."actorId";
   IF current_sequence <> NEW."observedEventSequence" THEN
     RAISE EXCEPTION 'reliance observed event sequence is stale';
   END IF;
 
   IF NEW."supersedesRelianceId" IS NOT NULL THEN
-    SELECT * INTO prior_basis
-    FROM "RelianceBasis"
-    WHERE "id" = NEW."supersedesRelianceId";
-
-    IF NOT FOUND THEN
-      RAISE EXCEPTION 'superseded reliance basis not found';
-    END IF;
-
+    SELECT * INTO prior_basis FROM "RelianceBasis" WHERE "id" = NEW."supersedesRelianceId";
+    IF NOT FOUND THEN RAISE EXCEPTION 'superseded reliance basis not found'; END IF;
     IF prior_basis."actorId" <> NEW."actorId"
        OR prior_basis."counterpartyType" <> NEW."counterpartyType"
        OR prior_basis."counterpartyRef" <> NEW."counterpartyRef"
        OR prior_basis."relationKind" <> NEW."relationKind" THEN
       RAISE EXCEPTION 'renewal may only supersede reliance by the same counterparty over the same actor relation';
     END IF;
-
     IF NEW."reliedAt" < prior_basis."reliedAt" THEN
       RAISE EXCEPTION 'renewed reliance cannot predate the reliance it supersedes';
     END IF;
@@ -213,15 +211,14 @@ DECLARE
   basis "RelianceBasis"%ROWTYPE;
   actor_record "Actor"%ROWTYPE;
   successor_execution "ActorExecution"%ROWTYPE;
+  current_sequence INTEGER;
   change_count INTEGER;
 BEGIN
   SELECT * INTO basis FROM "RelianceBasis" WHERE "id" = NEW."relianceId";
   IF NOT FOUND THEN RAISE EXCEPTION 'reliance basis not found'; END IF;
-
   IF basis."actorId" <> NEW."actorId" THEN
     RAISE EXCEPTION 'assessment actor does not match reliance actor';
   END IF;
-
   IF NEW."assessedAt" < basis."capturedAt" THEN
     RAISE EXCEPTION 'assessment cannot precede reliance capture';
   END IF;
@@ -230,12 +227,16 @@ BEGIN
   IF actor_record."canonicalLineageId" <> NEW."successorLineageId" THEN
     RAISE EXCEPTION 'assessment must bind the current canonical lineage head';
   END IF;
+  IF actor_record."ownerId" IS DISTINCT FROM NEW."successorActorOwnerId" THEN
+    RAISE EXCEPTION 'assessment successor owner snapshot mismatch';
+  END IF;
 
-  SELECT * INTO successor_execution
-  FROM "ActorExecution"
-  WHERE "id" = NEW."successorExecutionId";
+  SELECT * INTO successor_execution FROM "ActorExecution" WHERE "id" = NEW."successorExecutionId";
   IF NOT FOUND OR successor_execution."actorId" <> NEW."actorId" OR successor_execution."endedAt" IS NOT NULL THEN
     RAISE EXCEPTION 'assessment must bind the current live execution';
+  END IF;
+  IF successor_execution."configHash" <> NEW."successorExecutionConfigHash" THEN
+    RAISE EXCEPTION 'assessment successor execution config hash mismatch';
   END IF;
 
   IF NOT EXISTS (
@@ -245,6 +246,12 @@ BEGIN
       AND "canonical" IS TRUE
   ) THEN
     RAISE EXCEPTION 'assessment successor lineage is not canonical';
+  END IF;
+
+  SELECT COALESCE(MAX("sequence"), 0) INTO current_sequence
+  FROM "ActorEvent" WHERE "actorId" = NEW."actorId";
+  IF current_sequence <> NEW."successorEventSequence" THEN
+    RAISE EXCEPTION 'assessment successor event sequence is stale';
   END IF;
 
   SELECT jsonb_array_length(NEW."structuralChanges") INTO change_count;
