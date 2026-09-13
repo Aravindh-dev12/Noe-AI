@@ -78,7 +78,7 @@ function baseRecord(): DecisionInquiryRecord {
 }
 
 describe('epistemic diligence evidence', () => {
-  it('treats completed authoritative verification as satisfying the requirement', () => {
+  it('treats completed fresh authoritative verification as satisfying the requirement', () => {
     const record = baseRecord();
     expect(() => assertValidDecisionInquiryRecord(record)).not.toThrow();
 
@@ -167,6 +167,38 @@ describe('epistemic diligence evidence', () => {
     const coverage = deriveDecisionInquiryCoverage(record);
     expect(coverage.requirements[0]?.disposition).toBe('attempted-but-unresolved');
     expect(coverage.hasMissedAvailableCheck).toBe(false);
+  });
+
+  it('does not count stale evidence as satisfying a freshness-bounded check', () => {
+    const record: DecisionInquiryRecord = {
+      ...baseRecord(),
+      evidenceUsed: [
+        {
+          ...baseRecord().evidenceUsed[0]!,
+          observedAt: '2026-09-13T09:50:00.000Z',
+        },
+      ],
+    };
+
+    const coverage = deriveDecisionInquiryCoverage(record);
+    expect(coverage.mandatorySatisfied).toBe(0);
+    expect(coverage.requirements[0]?.disposition).toBe('attempted-but-unresolved');
+  });
+
+  it('rejects an opportunity claimed available outside its attested validity window', () => {
+    const record: DecisionInquiryRecord = {
+      ...baseRecord(),
+      opportunities: [
+        {
+          ...baseRecord().opportunities[0]!,
+          validUntil: '2026-09-13T09:59:40.000Z',
+        },
+      ],
+    };
+
+    expect(() => assertValidDecisionInquiryRecord(record)).toThrow(
+      /expired at decision time/,
+    );
   });
 
   it('keeps unknown opportunity state indeterminate instead of inferring negligence', () => {
