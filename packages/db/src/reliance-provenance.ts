@@ -210,13 +210,13 @@ function actorStateDigest(input: {
 }
 
 function basisSemanticDigest(input: Omit<RelianceBasisRecord, 'id' | 'basisDigest'>): string {
-  return sha256({ version: 'noeone.reliance-basis.semantic.v1', ...input });
+  return sha256({ schema: 'noeone.reliance-basis.semantic.v1', record: input });
 }
 
 function assessmentSemanticDigest(
   input: Omit<RelianceChangeAssessment, 'id' | 'basisDigest'>,
 ): string {
-  return sha256({ version: 'noeone.reliance-assessment.semantic.v1', ...input });
+  return sha256({ schema: 'noeone.reliance-assessment.semantic.v1', record: input });
 }
 
 function toCoreBasis(row: RelianceBasis): RelianceBasisRecord {
@@ -630,7 +630,11 @@ export async function captureRelianceBasis(
 export async function assessRelianceChange(
   input: AssessRelianceChangeInput,
   registry: RegistryContext,
-): Promise<{ replayed: boolean; assessment: RelianceChangeAssessmentRow; structuralChanges: RelianceStructuralChange[] }> {
+): Promise<{
+  replayed: boolean;
+  assessment: RelianceChangeAssessmentRow;
+  structuralChanges: RelianceStructuralChange[];
+}> {
   const normalized = {
     relianceId: text(input.relianceId, 'relianceId'),
     actorId: text(input.actorId, 'actorId'),
@@ -937,7 +941,10 @@ export async function verifyRelianceProvenance(actorId: string): Promise<{
       const [execution, lineage, evidence] = await Promise.all([
         db.actorExecution.findUnique({ where: { id: row.executionId } }),
         db.lineageNode.findUnique({ where: { id: row.lineageId } }),
-        db.evidenceArtifact.findUnique({ where: { id: row.basisEvidenceArtifactId }, select: { id: true } }),
+        db.evidenceArtifact.findUnique({
+          where: { id: row.basisEvidenceArtifactId },
+          select: { id: true },
+        }),
       ]);
       if (!execution || execution.actorId !== row.actorId) {
         throw new Error('basis execution does not belong to actor');
@@ -985,7 +992,9 @@ export async function verifyRelianceProvenance(actorId: string): Promise<{
         throw new Error('actor state digest does not verify');
       }
 
-      const expectedBasisDigest = basisSemanticDigest((({ id: _id, basisDigest: _digest, ...rest }) => rest)(core));
+      const expectedBasisDigest = basisSemanticDigest(
+        (({ id: _id, basisDigest: _digest, ...rest }) => rest)(core),
+      );
       if (expectedBasisDigest !== row.basisDigest) {
         throw new Error('basis semantic digest does not verify');
       }
@@ -1013,7 +1022,10 @@ export async function verifyRelianceProvenance(actorId: string): Promise<{
       const [successorExecution, successorLineage, evidence] = await Promise.all([
         db.actorExecution.findUnique({ where: { id: row.successorExecutionId } }),
         db.lineageNode.findUnique({ where: { id: row.successorLineageId } }),
-        db.evidenceArtifact.findUnique({ where: { id: row.evidenceArtifactId }, select: { id: true } }),
+        db.evidenceArtifact.findUnique({
+          where: { id: row.evidenceArtifactId },
+          select: { id: true },
+        }),
       ]);
       if (!successorExecution || successorExecution.actorId !== row.actorId) {
         throw new Error('successor execution does not belong to actor');
