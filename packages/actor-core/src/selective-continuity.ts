@@ -111,30 +111,26 @@ export function claimSemantics(kind: ContinuityClaimKind): ContinuityClaimSemant
 }
 
 export function planContinuityClaim(claim: ContinuityClaimRequest): ContinuityClaimPlan {
-  const semantics = claimSemantics(claim.kind);
-
-  if (semantics === 'negative-over-committed-set') {
-    return {
-      claim,
-      semantics,
-      acceptableProofFamilies: ['committed-set-non-membership', 'zk-predicate'],
-      requiresCommittedDataset: true,
-    };
-  }
-
   switch (claim.kind) {
+    case 'no_critical_incident_in_window':
+      return {
+        claim,
+        semantics: 'negative-over-committed-set',
+        acceptableProofFamilies: ['committed-set-non-membership', 'zk-predicate'],
+        requiresCommittedDataset: true,
+      };
     case 'same_canonical_actor':
     case 'canonical_since':
       return {
         claim,
-        semantics,
+        semantics: 'positive',
         acceptableProofFamilies: ['sd-jwt', 'bbs', 'zk-predicate', 'external-attestation'],
         requiresCommittedDataset: false,
       };
     case 'verified_event_count':
       return {
         claim,
-        semantics,
+        semantics: 'positive',
         acceptableProofFamilies: ['zk-predicate', 'external-attestation'],
         requiresCommittedDataset: false,
       };
@@ -143,7 +139,7 @@ export function planContinuityClaim(claim: ContinuityClaimRequest): ContinuityCl
     case 'commitment_status':
       return {
         claim,
-        semantics,
+        semantics: 'positive',
         acceptableProofFamilies: ['sd-jwt', 'bbs', 'zk-predicate', 'external-attestation'],
         requiresCommittedDataset: false,
       };
