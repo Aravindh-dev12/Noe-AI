@@ -34,10 +34,12 @@ const app = Fastify({
       paths: [
         'req.headers.authorization',
         'req.headers.cookie',
+        'req.headers.x-noe-admin-key',
         'req.headers.x-noeone-admin-key',
         'req.headers.x-onbae-admin-key',
         'headers.authorization',
         'headers.cookie',
+        'headers.x-noe-admin-key',
         'headers.x-noeone-admin-key',
         'headers.x-onbae-admin-key',
       ],
@@ -59,6 +61,7 @@ await app.register(cors, {
     'Content-Type',
     'Authorization',
     'X-Requested-With',
+    'X-NOE-Admin-Key',
     'X-NOEONE-Admin-Key',
     'X-Onbae-Admin-Key',
   ],
@@ -129,7 +132,7 @@ process.on('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('SIGINT', () => void shutdown('SIGINT'));
 
 start().catch(async (error: unknown) => {
-  app.log.fatal({ err: error }, 'failed to start NOEONE API');
+  app.log.fatal({ err: error }, 'failed to start NOE API');
   await db.$disconnect();
   process.exit(1);
 });
