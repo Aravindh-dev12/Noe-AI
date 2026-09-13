@@ -16,7 +16,7 @@ const boundedId = z.string().min(1).max(240);
 const boundedText = z.string().min(1).max(1000);
 const digest = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const timestamp = z.string().datetime({ offset: true });
-const metadata = z.record(z.string(), z.unknown()).optional();
+const metadata = z.record(z.string(), z.json()).optional();
 const transportProfile = z.enum(['internal', 'ssf', 'caep', 'webhook', 'manual', 'other']);
 const listSchema = z
   .object({ limit: z.coerce.number().int().min(1).max(500).default(100) })
