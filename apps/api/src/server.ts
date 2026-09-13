@@ -110,6 +110,7 @@ await actorResolutionRoutes(app);
 await matchRoutes(app);
 await hostRoutes(app);
 await institutionalRoutes(app);
+await institutionalSuccessionRoutes(app);
 await verificationRoutes(app);
 await passportRoutes(app);
 

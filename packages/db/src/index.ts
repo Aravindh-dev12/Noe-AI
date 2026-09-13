@@ -16,6 +16,7 @@ export * from './events.js';
 export * from './host-receipts.js';
 export * from './continuity.js';
 export * from './institutional.js';
+export * from './institutional-succession.js';
 export * from './authority.js';
 export * from './temporal-authority.js';
 export * from './accountability.js';
