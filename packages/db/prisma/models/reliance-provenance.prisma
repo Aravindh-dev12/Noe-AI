@@ -40,25 +40,34 @@ model RelianceBasis {
 }
 
 model RelianceChangeAssessment {
-  id                    String   @id
-  relianceId            String
-  actorId               String
-  successorLineageId    String
-  successorExecutionId  String
-  successorStateDigest  String
-  structuralChanges     Json
-  disposition           String
-  evaluatorType         String
-  evaluatorRef          String
-  method                String
-  methodVersion         String
-  evidenceArtifactId    String
-  reason                String?
-  assessedAt            DateTime
-  basisDigest           String   @unique
-  idempotencyKey        String   @unique
-  metadata              Json     @default("{}")
-  createdAt             DateTime @default(now())
+  id                                String   @id
+  relianceId                        String
+  actorId                           String
+  successorLineageId                String
+  successorExecutionId              String
+  successorExecutionConfigHash      String
+  successorActorOwnerId             String?
+  successorEventSequence            Int
+  successorDisclosureBundleDigest   String
+  successorCapabilitySnapshotDigest String?
+  successorAuthoritySnapshotDigest  String?
+  successorControlSnapshotDigest    String?
+  successorCorrectiveStateDigest    String?
+  successorDependencySnapshotDigest String?
+  successorStateDigest              String
+  structuralChanges                 Json
+  disposition                       String
+  evaluatorType                     String
+  evaluatorRef                      String
+  method                            String
+  methodVersion                     String
+  evidenceArtifactId                String
+  reason                            String?
+  assessedAt                        DateTime
+  basisDigest                       String   @unique
+  idempotencyKey                    String   @unique
+  metadata                          Json     @default("{}")
+  createdAt                         DateTime @default(now())
 
   @@index([relianceId, assessedAt])
   @@index([actorId, assessedAt])
