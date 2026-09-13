@@ -75,6 +75,12 @@ export type RelianceSignalProjection = {
 };
 
 const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/i;
+const COUNTERPARTY_RESPONSE_KINDS = new Set<RelianceSignalReceiptKind>([
+  'acknowledged',
+  'review-started',
+  'reliance-renewed',
+  'reliance-rejected',
+]);
 
 function assertNonEmpty(value: string, field: string): void {
   if (!value.trim()) throw new Error(`${field} is required.`);
@@ -166,7 +172,10 @@ export function assertValidRelianceSignal(
   if (!equalStringSets(signal.structuralChanges, assessment.structuralChanges)) {
     throw new Error('Reliance signal structural changes do not match the change assessment.');
   }
-  if (timestamp(signal.emittedAt, 'signal.emittedAt') < timestamp(assessment.assessedAt, 'assessment.assessedAt')) {
+  if (
+    timestamp(signal.emittedAt, 'signal.emittedAt') <
+    timestamp(assessment.assessedAt, 'assessment.assessedAt')
+  ) {
     throw new Error('Reliance signal cannot be emitted before the source assessment.');
   }
 }
@@ -202,8 +211,22 @@ export function assertValidRelianceSignalReceipt(
   ) {
     throw new Error('Reliance signal receipt does not match the source signal.');
   }
-  if (timestamp(receipt.observedAt, 'receipt.observedAt') < timestamp(signal.emittedAt, 'signal.emittedAt')) {
+  if (
+    timestamp(receipt.observedAt, 'receipt.observedAt') <
+    timestamp(signal.emittedAt, 'signal.emittedAt')
+  ) {
     throw new Error('Reliance signal receipt cannot precede signal emission.');
+  }
+
+  if (COUNTERPARTY_RESPONSE_KINDS.has(receipt.kind)) {
+    if (
+      receipt.partyType !== signal.counterpartyType ||
+      receipt.partyRef !== signal.counterpartyRef
+    ) {
+      throw new Error(
+        `${receipt.kind} receipt must be attributable to the original relying counterparty.`,
+      );
+    }
   }
 
   if (receipt.kind === 'reliance-renewed') {
@@ -235,7 +258,10 @@ export function assertValidRelianceRenewalReceipt(
   if (successorBasis.supersedesRelianceId !== originalBasis.id) {
     throw new Error('Successor reliance basis must explicitly supersede the original reliance.');
   }
-  if (successorBasis.actorId !== originalBasis.actorId || successorBasis.actorId !== signal.actorId) {
+  if (
+    successorBasis.actorId !== originalBasis.actorId ||
+    successorBasis.actorId !== signal.actorId
+  ) {
     throw new Error('Renewal reliance basis must concern the same actor.');
   }
   if (
@@ -245,10 +271,16 @@ export function assertValidRelianceRenewalReceipt(
   ) {
     throw new Error('Renewal reliance basis must preserve counterparty and relation semantics.');
   }
-  if (timestamp(successorBasis.capturedAt, 'successorBasis.capturedAt') < timestamp(signal.emittedAt, 'signal.emittedAt')) {
+  if (
+    timestamp(successorBasis.capturedAt, 'successorBasis.capturedAt') <
+    timestamp(signal.emittedAt, 'signal.emittedAt')
+  ) {
     throw new Error('Successor reliance basis cannot predate the reliance signal.');
   }
-  if (timestamp(receipt.observedAt, 'receipt.observedAt') < timestamp(successorBasis.capturedAt, 'successorBasis.capturedAt')) {
+  if (
+    timestamp(receipt.observedAt, 'receipt.observedAt') <
+    timestamp(successorBasis.capturedAt, 'successorBasis.capturedAt')
+  ) {
     throw new Error('Renewal receipt cannot predate the successor reliance basis.');
   }
 }
@@ -257,12 +289,14 @@ export function deriveRelianceSignalProjection(
   receipts: readonly RelianceSignalReceipt[],
 ): RelianceSignalProjection {
   const ordered = [...receipts].sort((left, right) => {
-    const byTime = timestamp(left.observedAt, 'receipt.observedAt') - timestamp(right.observedAt, 'receipt.observedAt');
+    const byTime =
+      timestamp(left.observedAt, 'receipt.observedAt') -
+      timestamp(right.observedAt, 'receipt.observedAt');
     return byTime !== 0 ? byTime : left.id.localeCompare(right.id);
   });
 
   let terminal: RelianceSignalProjection['terminal'] = null;
-  const terminalKinds = new Set<RelianceSignalProjection['terminal']>();
+  const terminalKinds = new Set<'renewed' | 'rejected' | 'expired'>();
   let delivered = false;
   let acknowledged = false;
   let reviewStarted = false;
