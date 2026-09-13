@@ -119,13 +119,13 @@ export type TransitionCollectiveInput = {
 
 const DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
 
-function assertNonEmpty(value: string, name: string): string {
+function nonEmpty(value: string, name: string): string {
   const normalized = value.trim();
   if (!normalized) throw new Error(`${name} must not be empty.`);
   return normalized;
 }
 
-function assertDigest(value: string, name: string): string {
+function digestValue(value: string, name: string): string {
   const normalized = value.trim().toLowerCase();
   if (!DIGEST_PATTERN.test(normalized)) {
     throw new Error(`${name} must be a sha256:<64 lowercase hex> digest.`);
@@ -133,7 +133,7 @@ function assertDigest(value: string, name: string): string {
   return normalized;
 }
 
-function assertWeight(weightBps: number | null): void {
+function validWeight(weightBps: number | null): void {
   if (weightBps === null) return;
   if (!Number.isInteger(weightBps) || weightBps < 0 || weightBps > 10_000) {
     throw new Error('Member weightBps must be an integer between 0 and 10000.');
@@ -144,33 +144,27 @@ function normalizeRoster(
   collectiveActorId: string,
   roster: readonly CollectiveMemberSpec[],
 ): Array<{ memberActorId: string; role: string; weightBps: number | null }> {
+  if (roster.length === 0) throw new Error('A collective epoch must contain at least one member.');
+
   const seen = new Set<string>();
   const normalized = roster.map((entry) => {
-    const memberActorId = assertNonEmpty(entry.memberActorId, 'memberActorId');
+    const memberActorId = nonEmpty(entry.memberActorId, 'memberActorId');
     if (memberActorId === collectiveActorId) {
       throw new Error('A collective actor cannot be a member of itself.');
     }
-    if (seen.has(memberActorId)) {
-      throw new Error(`Duplicate collective member: ${memberActorId}.`);
-    }
+    if (seen.has(memberActorId)) throw new Error(`Duplicate collective member: ${memberActorId}.`);
     seen.add(memberActorId);
 
     const weightBps = entry.weightBps ?? null;
-    assertWeight(weightBps);
-
+    validWeight(weightBps);
     return {
       memberActorId,
-      role: assertNonEmpty(entry.role, 'member role'),
+      role: nonEmpty(entry.role, 'member role'),
       weightBps,
     };
   });
 
-  if (normalized.length === 0) {
-    throw new Error('A collective epoch must contain at least one member.');
-  }
-
-  normalized.sort((a, b) => a.memberActorId.localeCompare(b.memberActorId));
-  return normalized;
+  return normalized.sort((a, b) => a.memberActorId.localeCompare(b.memberActorId));
 }
 
 export function digestCollectiveRoster(roster: readonly CollectiveMemberSpec[]): string {
@@ -186,7 +180,7 @@ export function digestCollectiveRoster(roster: readonly CollectiveMemberSpec[]):
 }
 
 export function createCollective(input: CreateCollectiveInput): CollectiveAggregate {
-  const collectiveActorId = assertNonEmpty(input.collectiveActorId, 'collectiveActorId');
+  const collectiveActorId = nonEmpty(input.collectiveActorId, 'collectiveActorId');
   const now = input.now ?? new Date().toISOString();
   const roster = normalizeRoster(collectiveActorId, input.roster);
   const epochId = `cepoch_${randomUUID()}`;
@@ -202,19 +196,7 @@ export function createCollective(input: CreateCollectiveInput): CollectiveAggreg
     joinEpochId: epochId,
     leaveEpochId: null,
   }));
-
-  const membershipByActor = new Map(memberships.map((membership) => [membership.memberActorId, membership]));
-  const epochMemberships: CollectiveEpochMembership[] = roster.map((member) => {
-    const membership = membershipByActor.get(member.memberActorId);
-    if (!membership) throw new Error('Collective membership construction failed.');
-    return {
-      epochId,
-      membershipId: membership.id,
-      memberActorId: member.memberActorId,
-      role: member.role,
-      weightBps: member.weightBps,
-    };
-  });
+  const byActor = new Map(memberships.map((membership) => [membership.memberActorId, membership]));
 
   const aggregate: CollectiveAggregate = {
     collectiveActorId,
@@ -225,9 +207,9 @@ export function createCollective(input: CreateCollectiveInput): CollectiveAggreg
         sequence: 1,
         predecessorEpochId: null,
         transitionKind: 'formation',
-        constitutionDigest: assertDigest(input.constitutionDigest, 'constitutionDigest'),
-        topologyDigest: assertDigest(input.topologyDigest, 'topologyDigest'),
-        decisionPolicyDigest: assertDigest(input.decisionPolicyDigest, 'decisionPolicyDigest'),
+        constitutionDigest: digestValue(input.constitutionDigest, 'constitutionDigest'),
+        topologyDigest: digestValue(input.topologyDigest, 'topologyDigest'),
+        decisionPolicyDigest: digestValue(input.decisionPolicyDigest, 'decisionPolicyDigest'),
         rosterDigest: digestCollectiveRoster(roster),
         transitionEvidenceArtifactId: input.formationEvidenceArtifactId ?? null,
         startedAt: now,
@@ -235,7 +217,17 @@ export function createCollective(input: CreateCollectiveInput): CollectiveAggreg
       },
     ],
     memberships,
-    epochMemberships,
+    epochMemberships: roster.map((member) => {
+      const membership = byActor.get(member.memberActorId);
+      if (!membership) throw new Error('Collective membership construction failed.');
+      return {
+        epochId,
+        membershipId: membership.id,
+        memberActorId: member.memberActorId,
+        role: member.role,
+        weightBps: member.weightBps,
+      };
+    }),
   };
 
   validateCollectiveAggregate(aggregate);
@@ -256,16 +248,16 @@ export function getEpochRoster(
   aggregate: CollectiveAggregate,
   epochId: string,
 ): readonly CollectiveEpochMembership[] {
-  const epoch = aggregate.epochs.find((candidate) => candidate.id === epochId);
-  if (!epoch) throw new Error(`Unknown collective epoch: ${epochId}.`);
-
+  if (!aggregate.epochs.some((epoch) => epoch.id === epochId)) {
+    throw new Error(`Unknown collective epoch: ${epochId}.`);
+  }
   return aggregate.epochMemberships
     .filter((entry) => entry.epochId === epochId)
     .slice()
     .sort((a, b) => a.memberActorId.localeCompare(b.memberActorId));
 }
 
-function assertOrdinaryTransitionKind(kind: Exclude<CollectiveTransitionKind, 'formation'>): void {
+function assertOrdinaryTransition(kind: Exclude<CollectiveTransitionKind, 'formation'>): void {
   if (kind === 'merge' || kind === 'split' || kind === 'dissolution') {
     throw new Error(
       `${kind} is not an ordinary collective continuation; use ancestry/resolution semantics instead.`,
@@ -278,7 +270,7 @@ export function transitionCollective(
   input: TransitionCollectiveInput,
 ): CollectiveAggregate {
   validateCollectiveAggregate(aggregate);
-  assertOrdinaryTransitionKind(input.kind);
+  assertOrdinaryTransition(input.kind);
 
   const active = getActiveCollectiveEpoch(aggregate);
   if (input.predecessorEpochId !== active.id) {
@@ -291,17 +283,13 @@ export function transitionCollective(
     role: member.role,
     weightBps: member.weightBps,
   }));
-  const nextRoster = normalizeRoster(
-    aggregate.collectiveActorId,
-    input.roster ?? currentRoster,
-  );
-
-  const constitutionDigest = assertDigest(
+  const nextRoster = normalizeRoster(aggregate.collectiveActorId, input.roster ?? currentRoster);
+  const constitutionDigest = digestValue(
     input.constitutionDigest ?? active.constitutionDigest,
     'constitutionDigest',
   );
-  const topologyDigest = assertDigest(input.topologyDigest ?? active.topologyDigest, 'topologyDigest');
-  const decisionPolicyDigest = assertDigest(
+  const topologyDigest = digestValue(input.topologyDigest ?? active.topologyDigest, 'topologyDigest');
+  const decisionPolicyDigest = digestValue(
     input.decisionPolicyDigest ?? active.decisionPolicyDigest,
     'decisionPolicyDigest',
   );
@@ -320,29 +308,13 @@ export function transitionCollective(
     throw new Error('constitution_change requires a changed constitution digest.');
   }
 
-  const transitionEvidenceArtifactId = assertNonEmpty(
-    input.transitionEvidenceArtifactId,
-    'transitionEvidenceArtifactId',
-  );
   const nextEpochId = `cepoch_${randomUUID()}`;
-
-  const epochs = aggregate.epochs.map((epoch) =>
-    epoch.id === active.id ? { ...epoch, endedAt: now } : epoch,
-  );
-
-  const currentMemberships = aggregate.memberships.filter((membership) => membership.leftAt === null);
-  const currentByActor = new Map(currentMemberships.map((membership) => [membership.memberActorId, membership]));
   const nextByActor = new Map(nextRoster.map((member) => [member.memberActorId, member]));
-
   const memberships: CollectiveMembership[] = aggregate.memberships.map((membership) => {
     if (membership.leftAt !== null) return membership;
     const next = nextByActor.get(membership.memberActorId);
     if (!next || next.role !== membership.role || next.weightBps !== membership.weightBps) {
-      return {
-        ...membership,
-        leftAt: now,
-        leaveEpochId: nextEpochId,
-      };
+      return { ...membership, leftAt: now, leaveEpochId: nextEpochId };
     }
     return membership;
   });
@@ -354,10 +326,7 @@ export function transitionCollective(
   );
 
   for (const member of nextRoster) {
-    const existing = activeMembershipByActor.get(member.memberActorId);
-    if (existing) continue;
-
-    const prior = currentByActor.get(member.memberActorId);
+    if (activeMembershipByActor.has(member.memberActorId)) continue;
     const membership: CollectiveMembership = {
       id: `cmem_${randomUUID()}`,
       collectiveActorId: aggregate.collectiveActorId,
@@ -369,31 +338,16 @@ export function transitionCollective(
       joinEpochId: nextEpochId,
       leaveEpochId: null,
     };
-
-    // A role/weight change intentionally creates a new membership period rather
-    // than mutating the historical period.
-    void prior;
     memberships.push(membership);
     activeMembershipByActor.set(member.memberActorId, membership);
-  }
-
-  const epochMemberships: CollectiveEpochMembership[] = [...aggregate.epochMemberships];
-  for (const member of nextRoster) {
-    const membership = activeMembershipByActor.get(member.memberActorId);
-    if (!membership) throw new Error('Failed to resolve active membership for next epoch.');
-    epochMemberships.push({
-      epochId: nextEpochId,
-      membershipId: membership.id,
-      memberActorId: member.memberActorId,
-      role: member.role,
-      weightBps: member.weightBps,
-    });
   }
 
   const next: CollectiveAggregate = {
     collectiveActorId: aggregate.collectiveActorId,
     epochs: [
-      ...epochs,
+      ...aggregate.epochs.map((epoch) =>
+        epoch.id === active.id ? { ...epoch, endedAt: now } : epoch,
+      ),
       {
         id: nextEpochId,
         collectiveActorId: aggregate.collectiveActorId,
@@ -404,13 +358,29 @@ export function transitionCollective(
         topologyDigest,
         decisionPolicyDigest,
         rosterDigest,
-        transitionEvidenceArtifactId,
+        transitionEvidenceArtifactId: nonEmpty(
+          input.transitionEvidenceArtifactId,
+          'transitionEvidenceArtifactId',
+        ),
         startedAt: now,
         endedAt: null,
       },
     ],
     memberships,
-    epochMemberships,
+    epochMemberships: [
+      ...aggregate.epochMemberships,
+      ...nextRoster.map((member) => {
+        const membership = activeMembershipByActor.get(member.memberActorId);
+        if (!membership) throw new Error('Failed to resolve active membership for next epoch.');
+        return {
+          epochId: nextEpochId,
+          membershipId: membership.id,
+          memberActorId: member.memberActorId,
+          role: member.role,
+          weightBps: member.weightBps,
+        } satisfies CollectiveEpochMembership;
+      }),
+    ],
   };
 
   validateCollectiveAggregate(next);
@@ -426,13 +396,13 @@ export function bindCollectiveAction(
     sourceEvidenceArtifactId: string;
   },
 ): CollectiveActionBinding {
-  const epoch = aggregate.epochs.find((candidate) => candidate.id === input.epochId);
-  if (!epoch) throw new Error(`Unknown collective epoch: ${input.epochId}.`);
+  if (!aggregate.epochs.some((epoch) => epoch.id === input.epochId)) {
+    throw new Error(`Unknown collective epoch: ${input.epochId}.`);
+  }
 
   const memberActorId = input.memberActorId ?? null;
-  const roster = getEpochRoster(aggregate, epoch.id);
   const member = memberActorId
-    ? roster.find((candidate) => candidate.memberActorId === memberActorId)
+    ? getEpochRoster(aggregate, input.epochId).find((entry) => entry.memberActorId === memberActorId)
     : undefined;
 
   if (input.capacity === 'member_on_behalf' || input.capacity === 'member_personal') {
@@ -440,20 +410,16 @@ export function bindCollectiveAction(
       throw new Error(`${input.capacity} requires a member present in the exact collective epoch.`);
     }
   }
-
   if (input.capacity === 'collective_direct' && memberActorId !== null) {
     throw new Error('collective_direct must not masquerade a member action as a direct collective action.');
   }
 
   return {
     collectiveActorId: aggregate.collectiveActorId,
-    epochId: epoch.id,
+    epochId: input.epochId,
     capacity: input.capacity,
     memberActorId,
-    sourceEvidenceArtifactId: assertNonEmpty(
-      input.sourceEvidenceArtifactId,
-      'sourceEvidenceArtifactId',
-    ),
+    sourceEvidenceArtifactId: nonEmpty(input.sourceEvidenceArtifactId, 'sourceEvidenceArtifactId'),
   };
 }
 
@@ -467,7 +433,7 @@ export function recordCollectiveDecision(
     outcomeDigest: string;
     quorumBps?: number | null;
     evidenceArtifactId: string;
-    participants: readonly Array<{
+    participants: ReadonlyArray<{
       memberActorId: string;
       position?: string | null;
       evidenceArtifactId?: string | null;
@@ -475,32 +441,26 @@ export function recordCollectiveDecision(
     decidedAt?: string;
   },
 ): { decision: CollectiveDecision; participation: readonly CollectiveDecisionParticipation[] } {
-  const epoch = aggregate.epochs.find((candidate) => candidate.id === input.epochId);
-  if (!epoch) throw new Error(`Unknown collective epoch: ${input.epochId}.`);
-
+  const roster = getEpochRoster(aggregate, input.epochId);
+  const rosterByActor = new Map(roster.map((entry) => [entry.memberActorId, entry]));
   const quorumBps = input.quorumBps ?? null;
   if (quorumBps !== null && (!Number.isInteger(quorumBps) || quorumBps < 0 || quorumBps > 10_000)) {
     throw new Error('quorumBps must be an integer between 0 and 10000.');
   }
 
-  const roster = getEpochRoster(aggregate, epoch.id);
-  const rosterByActor = new Map(roster.map((entry) => [entry.memberActorId, entry]));
-  const seen = new Set<string>();
   const decisionId = `cdec_${randomUUID()}`;
-
+  const seen = new Set<string>();
   const participation = input.participants.map((participant) => {
     if (seen.has(participant.memberActorId)) {
       throw new Error(`Duplicate decision participant: ${participant.memberActorId}.`);
     }
     seen.add(participant.memberActorId);
-
     const member = rosterByActor.get(participant.memberActorId);
     if (!member) {
       throw new Error(
-        `Decision participant ${participant.memberActorId} was not a member of epoch ${epoch.id}.`,
+        `Decision participant ${participant.memberActorId} was not a member of epoch ${input.epochId}.`,
       );
     }
-
     return {
       decisionId,
       memberActorId: participant.memberActorId,
@@ -519,13 +479,13 @@ export function recordCollectiveDecision(
     decision: {
       id: decisionId,
       collectiveActorId: aggregate.collectiveActorId,
-      epochId: epoch.id,
-      decisionType: assertNonEmpty(input.decisionType, 'decisionType'),
-      proposalDigest: assertDigest(input.proposalDigest, 'proposalDigest'),
-      method: assertNonEmpty(input.method, 'decision method'),
-      outcomeDigest: assertDigest(input.outcomeDigest, 'outcomeDigest'),
+      epochId: input.epochId,
+      decisionType: nonEmpty(input.decisionType, 'decisionType'),
+      proposalDigest: digestValue(input.proposalDigest, 'proposalDigest'),
+      method: nonEmpty(input.method, 'decision method'),
+      outcomeDigest: digestValue(input.outcomeDigest, 'outcomeDigest'),
       quorumBps,
-      evidenceArtifactId: assertNonEmpty(input.evidenceArtifactId, 'evidenceArtifactId'),
+      evidenceArtifactId: nonEmpty(input.evidenceArtifactId, 'evidenceArtifactId'),
       decidedAt: input.decidedAt ?? new Date().toISOString(),
     },
     participation,
@@ -533,7 +493,7 @@ export function recordCollectiveDecision(
 }
 
 export function validateCollectiveAggregate(aggregate: CollectiveAggregate): void {
-  assertNonEmpty(aggregate.collectiveActorId, 'collectiveActorId');
+  nonEmpty(aggregate.collectiveActorId, 'collectiveActorId');
   if (aggregate.epochs.length === 0) throw new Error('Collective must contain at least one epoch.');
 
   const epochs = aggregate.epochs.slice().sort((a, b) => a.sequence - b.sequence);
@@ -565,12 +525,13 @@ export function validateCollectiveAggregate(aggregate: CollectiveAggregate): voi
     }
 
     if (epoch.endedAt === null) activeCount += 1;
-    assertDigest(epoch.constitutionDigest, 'constitutionDigest');
-    assertDigest(epoch.topologyDigest, 'topologyDigest');
-    assertDigest(epoch.decisionPolicyDigest, 'decisionPolicyDigest');
-    assertDigest(epoch.rosterDigest, 'rosterDigest');
+    digestValue(epoch.constitutionDigest, 'constitutionDigest');
+    digestValue(epoch.topologyDigest, 'topologyDigest');
+    digestValue(epoch.decisionPolicyDigest, 'decisionPolicyDigest');
+    digestValue(epoch.rosterDigest, 'rosterDigest');
 
     const roster = aggregate.epochMemberships.filter((entry) => entry.epochId === epoch.id);
+    if (roster.length === 0) throw new Error(`Collective epoch ${epoch.id} has an empty roster.`);
     const memberIds = new Set<string>();
     for (const entry of roster) {
       if (entry.memberActorId === aggregate.collectiveActorId) {
@@ -580,7 +541,6 @@ export function validateCollectiveAggregate(aggregate: CollectiveAggregate): voi
         throw new Error(`Duplicate member in epoch ${epoch.id}: ${entry.memberActorId}.`);
       }
       memberIds.add(entry.memberActorId);
-
       const membership = aggregate.memberships.find((candidate) => candidate.id === entry.membershipId);
       if (!membership) throw new Error(`Missing membership ${entry.membershipId}.`);
       if (
@@ -593,9 +553,7 @@ export function validateCollectiveAggregate(aggregate: CollectiveAggregate): voi
       }
     }
 
-    if (roster.length === 0) throw new Error(`Collective epoch ${epoch.id} has an empty roster.`);
-    const computedRosterDigest = digestCollectiveRoster(roster);
-    if (computedRosterDigest !== epoch.rosterDigest) {
+    if (digestCollectiveRoster(roster) !== epoch.rosterDigest) {
       throw new Error(`Collective epoch ${epoch.id} roster digest does not match its members.`);
     }
   }
@@ -605,31 +563,31 @@ export function validateCollectiveAggregate(aggregate: CollectiveAggregate): voi
   }
 
   const activeMemberships = aggregate.memberships.filter((membership) => membership.leftAt === null);
-  const activeMemberIds = new Set<string>();
+  const activeIds = new Set<string>();
   for (const membership of activeMemberships) {
     if (membership.collectiveActorId !== aggregate.collectiveActorId) {
       throw new Error('Membership belongs to a different collective actor.');
     }
-    if (activeMemberIds.has(membership.memberActorId)) {
+    if (activeIds.has(membership.memberActorId)) {
       throw new Error(`Duplicate active membership for ${membership.memberActorId}.`);
     }
-    activeMemberIds.add(membership.memberActorId);
+    activeIds.add(membership.memberActorId);
   }
 
   const activeEpoch = epochs.at(-1);
   if (!activeEpoch || activeEpoch.endedAt !== null) {
     throw new Error('The terminal collective epoch must be active.');
   }
-  const activeEpochMembers = new Set(
+  const epochActiveIds = new Set(
     aggregate.epochMemberships
       .filter((entry) => entry.epochId === activeEpoch.id)
       .map((entry) => entry.memberActorId),
   );
-  if (activeEpochMembers.size !== activeMemberIds.size) {
+  if (epochActiveIds.size !== activeIds.size) {
     throw new Error('Active membership tenures do not match the active epoch roster.');
   }
-  for (const memberActorId of activeEpochMembers) {
-    if (!activeMemberIds.has(memberActorId)) {
+  for (const memberActorId of epochActiveIds) {
+    if (!activeIds.has(memberActorId)) {
       throw new Error('Active epoch contains a member without an active membership tenure.');
     }
   }
