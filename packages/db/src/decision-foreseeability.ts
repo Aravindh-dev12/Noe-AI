@@ -388,7 +388,12 @@ export async function listDecisionForeseeabilityAssessments(frontierRecordId: st
 
 async function verifyStoredEvent(event: DbActorEvent, signingSecret: string): Promise<boolean> {
   const canonical = toCanonicalActorEvent(event);
-  return verifyEventHash(canonical) && verifyEventSignature(canonical, signingSecret);
+  const signature = canonical.provenance.signature;
+  return (
+    verifyEventHash(canonical) &&
+    typeof signature === 'string' &&
+    verifyEventSignature(canonical.hash, signature, signingSecret)
+  );
 }
 
 export async function verifyDecisionForeseeabilityRecord(
