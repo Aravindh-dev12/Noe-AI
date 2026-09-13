@@ -39,8 +39,6 @@ export type RelianceSignal = {
   successorEventSequence: number;
   structuralChanges: readonly RelianceStructuralChange[];
   disposition: RelianceChangeDisposition;
-  transportProfile: RelianceSignalTransportProfile;
-  transportRef?: string;
   emittedAt: string;
   signalDigest: string;
 };
@@ -54,6 +52,8 @@ export type RelianceSignalReceipt = {
   kind: RelianceSignalReceiptKind;
   partyType: string;
   partyRef: string;
+  transportProfile?: RelianceSignalTransportProfile;
+  transportRef?: string;
   evidenceArtifactId?: string;
   successorRelianceId?: string;
   detailDigest?: string;
@@ -81,6 +81,7 @@ const COUNTERPARTY_RESPONSE_KINDS = new Set<RelianceSignalReceiptKind>([
   'reliance-renewed',
   'reliance-rejected',
 ]);
+const DELIVERY_KINDS = new Set<RelianceSignalReceiptKind>(['delivered', 'delivery-failed']);
 
 function assertNonEmpty(value: string, field: string): void {
   if (!value.trim()) throw new Error(`${field} is required.`);
@@ -134,10 +135,6 @@ export function assertValidRelianceSignal(
   assertSha256(signal.successorStateDigest, 'signal.successorStateDigest');
   assertSha256(signal.signalDigest, 'signal.signalDigest');
   assertSequence(signal.successorEventSequence, 'signal.successorEventSequence');
-
-  if (signal.transportRef !== undefined) {
-    assertNonEmpty(signal.transportRef, 'signal.transportRef');
-  }
 
   if (signal.relianceId !== basis.id || signal.actorId !== basis.actorId) {
     throw new Error('Reliance signal does not match the reliance basis.');
@@ -197,6 +194,9 @@ export function assertValidRelianceSignalReceipt(
   assertSha256(receipt.receiptDigest, 'receipt.receiptDigest');
   assertOptionalSha256(receipt.detailDigest, 'receipt.detailDigest');
 
+  if (receipt.transportRef !== undefined) {
+    assertNonEmpty(receipt.transportRef, 'receipt.transportRef');
+  }
   if (receipt.evidenceArtifactId !== undefined) {
     assertNonEmpty(receipt.evidenceArtifactId, 'receipt.evidenceArtifactId');
   }
@@ -216,6 +216,13 @@ export function assertValidRelianceSignalReceipt(
     timestamp(signal.emittedAt, 'signal.emittedAt')
   ) {
     throw new Error('Reliance signal receipt cannot precede signal emission.');
+  }
+
+  if (DELIVERY_KINDS.has(receipt.kind) && receipt.transportProfile === undefined) {
+    throw new Error(`${receipt.kind} receipt requires transportProfile.`);
+  }
+  if (receipt.transportRef !== undefined && receipt.transportProfile === undefined) {
+    throw new Error('transportRef requires transportProfile.');
   }
 
   if (COUNTERPARTY_RESPONSE_KINDS.has(receipt.kind)) {
