@@ -16,6 +16,7 @@ import { authorityRoutes } from './routes/authority.js';
 import { capabilityContinuityRoutes } from './routes/capability-continuity.js';
 import { collectiveActionProvenanceRoutes } from './routes/collective-action-provenance.js';
 import { collectiveRoutes } from './routes/collectives.js';
+import { consequenceReceptionRoutes } from './routes/consequence-reception.js';
 import { continuityRoutes } from './routes/continuity.js';
 import { controlContinuityRoutes } from './routes/control-continuity.js';
 import { decisionForeseeabilityRoutes } from './routes/decision-foreseeability.js';
@@ -113,6 +114,7 @@ await authorityRoutes(app);
 await intentContinuityRoutes(app);
 await capabilityContinuityRoutes(app);
 await accountabilityRoutes(app);
+await consequenceReceptionRoutes(app);
 await epistemicDiligenceRoutes(app);
 await decisionForeseeabilityRoutes(app);
 await oversightOpportunityRoutes(app);
@@ -146,7 +148,7 @@ process.on('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('SIGINT', () => void shutdown('SIGINT'));
 
 start().catch(async (error: unknown) => {
-  app.log.fatal({ err: error }, 'failed to start NOE API');
+  app.log.fatal({ err: error }, 'failed to start NOEONE API');
   await db.$disconnect();
   process.exit(1);
 });
