@@ -80,6 +80,7 @@ const interventionFrontierSchema = z
     decisionAt: timestamp,
     windowOpenedAt: timestamp,
     interventionDeadlineAt: timestamp,
+    deadlineEvidenceRefs: z.array(boundedRef).min(1).max(128),
     closeReason: z.enum([
       'effect-committed',
       'deadline',
@@ -124,6 +125,7 @@ const interventionFrontierSchema = z
     fallback: z
       .object({
         onNoResponse: z.enum(['allow', 'deny', 'pause', 'escalate', 'unknown']),
+        triggerAt: timestamp.optional(),
         enforcementRef: boundedRef.optional(),
       })
       .strict(),
