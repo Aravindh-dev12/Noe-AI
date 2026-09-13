@@ -92,7 +92,8 @@ describe('decision frontier evidence', () => {
   });
 
   it('rejects candidates inserted after the historical decision', () => {
-    const { safeDefaultCandidateId: _safeDefaultCandidateId, ...withoutSafeDefault } = baseFrontier();
+    const withoutSafeDefault = { ...baseFrontier() };
+    delete withoutSafeDefault.safeDefaultCandidateId;
     const frontier: DecisionFrontierRecord = {
       ...withoutSafeDefault,
       candidates: [
