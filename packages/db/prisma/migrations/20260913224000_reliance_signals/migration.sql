@@ -1,8 +1,9 @@
 -- Reliance Signals / Material-Change Propagation
 --
--- A signal binds one immutable Reliance Change Assessment to the exact
--- historical counterparty that relied on the actor. Signal receipts preserve
--- delivery and institutional response without mutating the source signal.
+-- One semantic signal binds one immutable Reliance Change Assessment to the
+-- exact historical counterparty that relied on the actor. Delivery transports
+-- belong to append-only receipts so multiple channels cannot fork the signal's
+-- institutional meaning.
 
 CREATE TABLE "RelianceSignal" (
     "id" TEXT NOT NULL,
@@ -19,8 +20,6 @@ CREATE TABLE "RelianceSignal" (
     "successorEventSequence" INTEGER NOT NULL,
     "structuralChanges" JSONB NOT NULL,
     "disposition" TEXT NOT NULL,
-    "transportProfile" TEXT NOT NULL,
-    "transportRef" TEXT,
     "emittedAt" TIMESTAMP(3) NOT NULL,
     "signalDigest" TEXT NOT NULL,
     "idempotencyKey" TEXT NOT NULL,
@@ -33,9 +32,6 @@ CREATE TABLE "RelianceSignal" (
     ),
     CONSTRAINT "RelianceSignal_disposition_check" CHECK (
       "disposition" IN ('UNAFFECTED','REVIEW_REQUIRED','INVALIDATED','DISPUTED')
-    ),
-    CONSTRAINT "RelianceSignal_transport_profile_check" CHECK (
-      "transportProfile" IN ('INTERNAL','SSF','CAEP','WEBHOOK','MANUAL','OTHER')
     ),
     CONSTRAINT "RelianceSignal_original_hash_check" CHECK ("originalActorStateDigest" ~ '^sha256:[0-9a-f]{64}$'),
     CONSTRAINT "RelianceSignal_successor_hash_check" CHECK ("successorStateDigest" ~ '^sha256:[0-9a-f]{64}$'),
@@ -52,6 +48,8 @@ CREATE TABLE "RelianceSignalReceipt" (
     "kind" TEXT NOT NULL,
     "partyType" TEXT NOT NULL,
     "partyRef" TEXT NOT NULL,
+    "transportProfile" TEXT,
+    "transportRef" TEXT,
     "evidenceArtifactId" TEXT,
     "successorRelianceId" TEXT,
     "detailDigest" TEXT,
@@ -68,17 +66,27 @@ CREATE TABLE "RelianceSignalReceipt" (
         'RELIANCE_RENEWED','RELIANCE_REJECTED','EXPIRED'
       )
     ),
+    CONSTRAINT "RelianceSignalReceipt_transport_profile_check" CHECK (
+      "transportProfile" IS NULL OR
+      "transportProfile" IN ('INTERNAL','SSF','CAEP','WEBHOOK','MANUAL','OTHER')
+    ),
+    CONSTRAINT "RelianceSignalReceipt_transport_ref_check" CHECK (
+      "transportRef" IS NULL OR "transportProfile" IS NOT NULL
+    ),
+    CONSTRAINT "RelianceSignalReceipt_delivery_transport_check" CHECK (
+      "kind" NOT IN ('DELIVERED','DELIVERY_FAILED') OR "transportProfile" IS NOT NULL
+    ),
     CONSTRAINT "RelianceSignalReceipt_detail_hash_check" CHECK (
       "detailDigest" IS NULL OR "detailDigest" ~ '^sha256:[0-9a-f]{64}$'
     ),
     CONSTRAINT "RelianceSignalReceipt_digest_check" CHECK ("receiptDigest" ~ '^sha256:[0-9a-f]{64}$')
 );
 
+CREATE UNIQUE INDEX "RelianceSignal_assessmentId_key" ON "RelianceSignal"("assessmentId");
 CREATE UNIQUE INDEX "RelianceSignal_signalDigest_key" ON "RelianceSignal"("signalDigest");
 CREATE UNIQUE INDEX "RelianceSignal_idempotencyKey_key" ON "RelianceSignal"("idempotencyKey");
 CREATE INDEX "RelianceSignal_actorId_emittedAt_idx" ON "RelianceSignal"("actorId", "emittedAt");
 CREATE INDEX "RelianceSignal_relianceId_emittedAt_idx" ON "RelianceSignal"("relianceId", "emittedAt");
-CREATE INDEX "RelianceSignal_assessmentId_idx" ON "RelianceSignal"("assessmentId");
 CREATE INDEX "RelianceSignal_counterparty_idx" ON "RelianceSignal"("counterpartyType", "counterpartyRef", "emittedAt");
 CREATE INDEX "RelianceSignal_disposition_idx" ON "RelianceSignal"("disposition", "emittedAt");
 
@@ -88,6 +96,7 @@ CREATE INDEX "RelianceSignalReceipt_signalId_observedAt_idx" ON "RelianceSignalR
 CREATE INDEX "RelianceSignalReceipt_actorId_observedAt_idx" ON "RelianceSignalReceipt"("actorId", "observedAt");
 CREATE INDEX "RelianceSignalReceipt_relianceId_observedAt_idx" ON "RelianceSignalReceipt"("relianceId", "observedAt");
 CREATE INDEX "RelianceSignalReceipt_kind_observedAt_idx" ON "RelianceSignalReceipt"("kind", "observedAt");
+CREATE INDEX "RelianceSignalReceipt_transportProfile_observedAt_idx" ON "RelianceSignalReceipt"("transportProfile", "observedAt");
 CREATE INDEX "RelianceSignalReceipt_evidenceArtifactId_idx" ON "RelianceSignalReceipt"("evidenceArtifactId");
 CREATE INDEX "RelianceSignalReceipt_successorRelianceId_idx" ON "RelianceSignalReceipt"("successorRelianceId");
 
@@ -183,6 +192,21 @@ BEGIN
     RAISE EXCEPTION 'reliance signal receipt cannot predate signal emission';
   END IF;
 
+  IF NEW."kind" IN ('DELIVERED','DELIVERY_FAILED') AND NEW."transportProfile" IS NULL THEN
+    RAISE EXCEPTION 'delivery receipt requires transport profile';
+  END IF;
+  IF NEW."transportRef" IS NOT NULL AND NEW."transportProfile" IS NULL THEN
+    RAISE EXCEPTION 'transport reference requires transport profile';
+  END IF;
+
+  IF NEW."kind" IN ('ACKNOWLEDGED','REVIEW_STARTED','RELIANCE_RENEWED','RELIANCE_REJECTED')
+     AND (
+       NEW."partyType" <> signal_record."counterpartyType"
+       OR NEW."partyRef" <> signal_record."counterpartyRef"
+     ) THEN
+    RAISE EXCEPTION 'institutional reliance response must come from original relying counterparty';
+  END IF;
+
   IF NEW."kind" <> 'EXPIRED' AND NEW."evidenceArtifactId" IS NULL THEN
     RAISE EXCEPTION 'non-expiry reliance signal receipt requires evidence';
   END IF;
@@ -193,6 +217,8 @@ BEGIN
     END IF;
 
     SELECT * INTO basis FROM "RelianceBasis" WHERE "id" = NEW."relianceId";
+    IF NOT FOUND THEN RAISE EXCEPTION 'renewal source reliance not found'; END IF;
+
     SELECT * INTO successor_basis FROM "RelianceBasis" WHERE "id" = NEW."successorRelianceId";
     IF NOT FOUND THEN RAISE EXCEPTION 'renewal successor reliance not found'; END IF;
 
