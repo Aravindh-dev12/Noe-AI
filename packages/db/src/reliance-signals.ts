@@ -32,8 +32,6 @@ import { db } from './index.js';
 
 export type EmitRelianceSignalInput = {
   assessmentId: string;
-  transportProfile: RelianceSignalTransportProfile;
-  transportRef?: string | null;
   emittedAt?: Date;
   idempotencyKey: string;
   metadata?: Prisma.InputJsonObject;
@@ -44,6 +42,8 @@ export type RecordRelianceSignalReceiptInput = {
   kind: RelianceSignalReceiptKind;
   partyType: string;
   partyRef: string;
+  transportProfile?: RelianceSignalTransportProfile | null;
+  transportRef?: string | null;
   evidenceArtifactId?: string | null;
   successorRelianceId?: string | null;
   detailDigest?: string | null;
@@ -318,8 +318,6 @@ function toCoreSignal(row: RelianceSignalRow): RelianceSignal {
     successorEventSequence: row.successorEventSequence,
     structuralChanges: parseStructuralChanges(row.structuralChanges),
     disposition: dispositionFromDb(row.disposition),
-    transportProfile: transportFromDb(row.transportProfile),
-    ...(row.transportRef ? { transportRef: row.transportRef } : {}),
     emittedAt: row.emittedAt.toISOString(),
     signalDigest: row.signalDigest,
   };
@@ -335,6 +333,10 @@ function toCoreReceipt(row: RelianceSignalReceiptRow): RelianceSignalReceipt {
     kind: receiptKindFromDb(row.kind),
     partyType: row.partyType,
     partyRef: row.partyRef,
+    ...(row.transportProfile
+      ? { transportProfile: transportFromDb(row.transportProfile) }
+      : {}),
+    ...(row.transportRef ? { transportRef: row.transportRef } : {}),
     ...(row.evidenceArtifactId ? { evidenceArtifactId: row.evidenceArtifactId } : {}),
     ...(row.successorRelianceId ? { successorRelianceId: row.successorRelianceId } : {}),
     ...(row.detailDigest ? { detailDigest: row.detailDigest } : {}),
@@ -374,8 +376,6 @@ function assertSignalReplayCompatible(
 ): void {
   const same =
     existing.assessmentId === input.assessmentId.trim() &&
-    existing.transportProfile === transportToDb(input.transportProfile) &&
-    existing.transportRef === (input.transportRef?.trim() || null) &&
     (input.emittedAt === undefined || existing.emittedAt.getTime() === input.emittedAt.getTime());
   if (!same) {
     throw new RelianceSignalConflictError(
@@ -393,6 +393,9 @@ function assertReceiptReplayCompatible(
     existing.kind === receiptKindToDb(input.kind) &&
     existing.partyType === input.partyType.trim() &&
     existing.partyRef === input.partyRef.trim() &&
+    existing.transportProfile ===
+      (input.transportProfile ? transportToDb(input.transportProfile) : null) &&
+    existing.transportRef === (input.transportRef?.trim() || null) &&
     existing.evidenceArtifactId === (input.evidenceArtifactId?.trim() || null) &&
     existing.successorRelianceId === (input.successorRelianceId?.trim() || null) &&
     existing.detailDigest === (input.detailDigest?.toLowerCase() ?? null) &&
@@ -410,20 +413,27 @@ export async function emitRelianceSignal(
 ): Promise<{ replayed: boolean; signal: RelianceSignalRow }> {
   const normalized = {
     assessmentId: text(input.assessmentId, 'assessmentId'),
-    transportProfile: input.transportProfile,
-    transportRef: input.transportRef?.trim() || null,
     emittedAt: input.emittedAt ?? new Date(),
     idempotencyKey: idempotencyKey(input.idempotencyKey),
     metadata: input.metadata ?? {},
   };
 
   return db.$transaction(async (tx) => {
-    const existing = await tx.relianceSignal.findUnique({
+    const existingByKey = await tx.relianceSignal.findUnique({
       where: { idempotencyKey: normalized.idempotencyKey },
     });
-    if (existing) {
-      assertSignalReplayCompatible(existing, input);
-      return { replayed: true, signal: existing };
+    if (existingByKey) {
+      assertSignalReplayCompatible(existingByKey, input);
+      return { replayed: true, signal: existingByKey };
+    }
+
+    const existingByAssessment = await tx.relianceSignal.findUnique({
+      where: { assessmentId: normalized.assessmentId },
+    });
+    if (existingByAssessment) {
+      throw new RelianceSignalConflictError(
+        `Reliance assessment ${normalized.assessmentId} already has signal ${existingByAssessment.id}.`,
+      );
     }
 
     const assessmentRow = await tx.relianceChangeAssessment.findUnique({
@@ -459,8 +469,6 @@ export async function emitRelianceSignal(
       successorEventSequence: assessment.successorEventSequence,
       structuralChanges: assessment.structuralChanges,
       disposition: assessment.disposition,
-      transportProfile: normalized.transportProfile,
-      ...(normalized.transportRef ? { transportRef: normalized.transportRef } : {}),
       emittedAt: normalized.emittedAt.toISOString(),
     };
     const core: RelianceSignal = {
@@ -486,8 +494,6 @@ export async function emitRelianceSignal(
         successorEventSequence: core.successorEventSequence,
         structuralChanges: core.structuralChanges as Prisma.InputJsonValue,
         disposition: dispositionToDb(core.disposition),
-        transportProfile: transportToDb(core.transportProfile),
-        transportRef: core.transportRef ?? null,
         emittedAt: new Date(core.emittedAt),
         signalDigest: core.signalDigest,
         idempotencyKey: normalized.idempotencyKey,
@@ -517,7 +523,6 @@ export async function emitRelianceSignal(
           signalDigest: core.signalDigest,
           counterpartyType: core.counterpartyType,
           counterpartyDigest: counterpartyDigest(core.counterpartyType, core.counterpartyRef),
-          transportProfile: core.transportProfile,
         },
       },
       registry.signingSecret,
@@ -536,6 +541,8 @@ export async function recordRelianceSignalReceipt(
     kind: input.kind,
     partyType: text(input.partyType, 'partyType'),
     partyRef: text(input.partyRef, 'partyRef'),
+    transportProfile: input.transportProfile ?? null,
+    transportRef: input.transportRef?.trim() || null,
     evidenceArtifactId: input.evidenceArtifactId
       ? text(input.evidenceArtifactId, 'evidenceArtifactId')
       : null,
@@ -593,6 +600,10 @@ export async function recordRelianceSignalReceipt(
       kind: normalized.kind,
       partyType: normalized.partyType,
       partyRef: normalized.partyRef,
+      ...(normalized.transportProfile
+        ? { transportProfile: normalized.transportProfile }
+        : {}),
+      ...(normalized.transportRef ? { transportRef: normalized.transportRef } : {}),
       ...(normalized.evidenceArtifactId
         ? { evidenceArtifactId: normalized.evidenceArtifactId }
         : {}),
@@ -616,8 +627,7 @@ export async function recordRelianceSignalReceipt(
       if (!successorRow) {
         throw Object.assign(new Error('Successor reliance basis not found.'), { statusCode: 404 });
       }
-      const successor = toCoreBasis(successorRow);
-      assertValidRelianceRenewalReceipt(core, signal, basis, successor);
+      assertValidRelianceRenewalReceipt(core, signal, basis, toCoreBasis(successorRow));
     }
 
     const created = await tx.relianceSignalReceipt.create({
@@ -629,6 +639,8 @@ export async function recordRelianceSignalReceipt(
         kind: receiptKindToDb(core.kind),
         partyType: core.partyType,
         partyRef: core.partyRef,
+        transportProfile: core.transportProfile ? transportToDb(core.transportProfile) : null,
+        transportRef: core.transportRef ?? null,
         evidenceArtifactId: core.evidenceArtifactId ?? null,
         successorRelianceId: core.successorRelianceId ?? null,
         detailDigest: core.detailDigest ?? null,
@@ -658,6 +670,7 @@ export async function recordRelianceSignalReceipt(
           receiptDigest: core.receiptDigest,
           partyType: core.partyType,
           partyDigest: counterpartyDigest(core.partyType, core.partyRef),
+          ...(core.transportProfile ? { transportProfile: core.transportProfile } : {}),
           ...(core.evidenceArtifactId ? { evidenceArtifactId: core.evidenceArtifactId } : {}),
           ...(core.successorRelianceId ? { successorRelianceId: core.successorRelianceId } : {}),
         },
@@ -669,18 +682,10 @@ export async function recordRelianceSignalReceipt(
   });
 }
 
-export async function getRelianceSignals(actorId: string, limit = 100): Promise<Array<{
-  signal: RelianceSignal;
-  projection: RelianceSignalProjection;
-}>> {
-  const normalizedActorId = text(actorId, 'actorId');
-  const rows = await db.relianceSignal.findMany({
-    where: { actorId: normalizedActorId },
-    orderBy: [{ emittedAt: 'desc' }, { id: 'desc' }],
-    take: Math.max(1, Math.min(limit, 500)),
-  });
+async function projectSignalRows(
+  rows: RelianceSignalRow[],
+): Promise<Array<{ signal: RelianceSignal; projection: RelianceSignalProjection }>> {
   if (rows.length === 0) return [];
-
   const receipts = await db.relianceSignalReceipt.findMany({
     where: { signalId: { in: rows.map((row) => row.id) } },
     orderBy: [{ observedAt: 'asc' }, { id: 'asc' }],
@@ -691,11 +696,23 @@ export async function getRelianceSignals(actorId: string, limit = 100): Promise<
     list.push(toCoreReceipt(row));
     bySignal.set(row.signalId, list);
   }
-
   return rows.map((row) => ({
     signal: toCoreSignal(row),
     projection: deriveRelianceSignalProjection(bySignal.get(row.id) ?? []),
   }));
+}
+
+export async function getRelianceSignals(
+  actorId: string,
+  limit = 100,
+): Promise<Array<{ signal: RelianceSignal; projection: RelianceSignalProjection }>> {
+  const normalizedActorId = text(actorId, 'actorId');
+  const rows = await db.relianceSignal.findMany({
+    where: { actorId: normalizedActorId },
+    orderBy: [{ emittedAt: 'desc' }, { id: 'desc' }],
+    take: Math.max(1, Math.min(limit, 500)),
+  });
+  return projectSignalRows(rows);
 }
 
 export async function getRelianceSignalReceipts(
@@ -745,7 +762,11 @@ export async function getActorRelianceBlastRadius(actorId: string): Promise<{
   }>;
 }> {
   const normalizedActorId = text(actorId, 'actorId');
-  const signals = await getRelianceSignals(normalizedActorId, 500);
+  const rows = await db.relianceSignal.findMany({
+    where: { actorId: normalizedActorId },
+    orderBy: [{ emittedAt: 'desc' }, { id: 'desc' }],
+  });
+  const signals = await projectSignalRows(rows);
   const dispositions = { unaffected: 0, reviewRequired: 0, invalidated: 0, disputed: 0 };
   const propagation = {
     delivered: 0,
@@ -847,9 +868,26 @@ export async function verifyRelianceSignalProvenance(actorId: string): Promise<{
       assertValidRelianceChangeAssessment(assessment, basis);
       assertValidRelianceSignal(signal, basis, assessment);
 
-      const { id: _id, signalDigest: _digest, ...withoutDigest } = signal;
-      const recomputed = signalSemanticDigest(withoutDigest);
-      if (recomputed !== signal.signalDigest) throw new Error('signal semantic digest mismatch');
+      const withoutDigest: Omit<RelianceSignal, 'id' | 'signalDigest'> = {
+        version: signal.version,
+        actorId: signal.actorId,
+        relianceId: signal.relianceId,
+        assessmentId: signal.assessmentId,
+        counterpartyType: signal.counterpartyType,
+        counterpartyRef: signal.counterpartyRef,
+        relationKind: signal.relationKind,
+        originalActorStateDigest: signal.originalActorStateDigest,
+        successorStateDigest: signal.successorStateDigest,
+        successorLineageId: signal.successorLineageId,
+        successorExecutionId: signal.successorExecutionId,
+        successorEventSequence: signal.successorEventSequence,
+        structuralChanges: signal.structuralChanges,
+        disposition: signal.disposition,
+        emittedAt: signal.emittedAt,
+      };
+      if (signalSemanticDigest(withoutDigest) !== signal.signalDigest) {
+        throw new Error('signal semantic digest mismatch');
+      }
 
       signalById.set(signal.id, signal);
       basisById.set(basis.id, basis);
@@ -868,9 +906,26 @@ export async function verifyRelianceSignalProvenance(actorId: string): Promise<{
       const receipt = toCoreReceipt(row);
       assertValidRelianceSignalReceipt(receipt, signal);
 
-      const { id: _id, receiptDigest: _digest, ...withoutDigest } = receipt;
-      const recomputed = receiptSemanticDigest(withoutDigest);
-      if (recomputed !== receipt.receiptDigest) throw new Error('receipt semantic digest mismatch');
+      const withoutDigest: Omit<RelianceSignalReceipt, 'id' | 'receiptDigest'> = {
+        version: receipt.version,
+        signalId: receipt.signalId,
+        actorId: receipt.actorId,
+        relianceId: receipt.relianceId,
+        kind: receipt.kind,
+        partyType: receipt.partyType,
+        partyRef: receipt.partyRef,
+        ...(receipt.transportProfile ? { transportProfile: receipt.transportProfile } : {}),
+        ...(receipt.transportRef ? { transportRef: receipt.transportRef } : {}),
+        ...(receipt.evidenceArtifactId ? { evidenceArtifactId: receipt.evidenceArtifactId } : {}),
+        ...(receipt.successorRelianceId
+          ? { successorRelianceId: receipt.successorRelianceId }
+          : {}),
+        ...(receipt.detailDigest ? { detailDigest: receipt.detailDigest } : {}),
+        observedAt: receipt.observedAt,
+      };
+      if (receiptSemanticDigest(withoutDigest) !== receipt.receiptDigest) {
+        throw new Error('receipt semantic digest mismatch');
+      }
 
       if (receipt.evidenceArtifactId) {
         const evidence = await db.evidenceArtifact.findUnique({
