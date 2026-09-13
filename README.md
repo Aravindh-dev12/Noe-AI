@@ -1,14 +1,14 @@
-# NOE
+# NOEONE
 
 > **Persistent careers and verifiable institutional history for artificial actors.**
 
-NOE is an experimental network and research platform for long-lived artificial actors that can change models, move between environments, compete, collaborate, accumulate obligations, exercise delegated authority, cause external consequences, and retain one canonical history over time.
+NOEONE is an experimental network and research platform for long-lived artificial actors that can change models, move between environments, compete, collaborate, accumulate obligations, exercise delegated authority, cause external consequences, and retain one canonical history over time.
 
 The core thesis is simple:
 
 > **Actor != model. History != memory.**
 
-A model is replaceable cognition. A NOE actor is the continuing identity whose lineage, relationships, verified events, evidence bindings, commitments, authority, consequences, institutional state, and research history persist while the underlying execution changes.
+A model is replaceable cognition. A NOEONE actor is the continuing identity whose lineage, relationships, verified events, evidence bindings, commitments, authority, consequences, institutional state, and research history persist while the underlying execution changes.
 
 ## What exists now
 
@@ -27,7 +27,7 @@ The first environment is **Triad**, a deterministic best-of-three competition us
 
 ## Continuity governance
 
-NOE separates the persistent actor from each execution of that actor.
+NOEONE separates the persistent actor from each execution of that actor.
 
 A governed migration records the exact predecessor lineage/execution, proposed execution manifest, authority, policy version, decision, resulting execution, and resulting canonical lineage node.
 
@@ -53,32 +53,32 @@ The child receives ancestry, not the parent's production identity, obligations, 
 
 ## External evidence: Host Receipts
 
-A third-party host should not be able to write directly into an actor's canonical history, and NOE should not pretend it directly observed activity inside another product.
+A third-party host should not be able to write directly into an actor's canonical history, and NOEONE should not pretend it directly observed activity inside another product.
 
 ```text
 External game / app / lab
         |
         | signed statement
         v
-NOE Host Receipt verification
+NOEONE Host Receipt verification
         |
         | registration policy passed
         v
-NOE canonical actor event
+NOEONE canonical actor event
         |
         v
 Actor career / passport
 ```
 
-The external signature proves **what the host claimed**. NOE's registry signature separately proves **that NOE accepted that statement into this actor's canonical history**.
+The external signature proves **what the host claimed**. NOEONE's registry signature separately proves **that NOEONE accepted that statement into this actor's canonical history**.
 
-Historical signed identifiers such as `noeone.host-receipt.v1` remain valid compatibility contracts. A public-brand correction never rewrites already-issued cryptographic history.
+Historical signed identifiers such as `noeone.host-receipt.v1` remain valid compatibility contracts. Public naming never rewrites already-issued cryptographic history.
 
 See [`docs/HOST_RECEIPTS.md`](./docs/HOST_RECEIPTS.md).
 
 ## Institutional state
 
-NOE does not collapse evidence, reputation, authority, causation, or legal consequence into one score.
+NOEONE does not collapse evidence, reputation, authority, causation, or legal consequence into one score.
 
 ```text
 EvidenceArtifact
@@ -103,7 +103,7 @@ Important properties:
 
 ## Decision and oversight provenance
 
-NOE is extending the actor record from *what happened* toward *what was historically possible and governable*.
+NOEONE is extending the actor record from *what happened* toward *what was historically possible and governable*.
 
 ```text
 Epistemic Diligence
@@ -132,13 +132,13 @@ Consequence Observation
         +----> oversight-effectiveness assessments
 ```
 
-The Intervention Frontier does **not** claim to invent human escalation, override systems, execution-finality enforcement, or meaningful human control. It tests a narrower NOE hypothesis: preserve the historically evidenced oversight opportunity — including unexercised, late, nominal, unavailable, or ineffective control paths — against the exact continuing actor, execution, decision, selected action, and effect boundary.
+The Intervention Frontier does **not** claim to invent human escalation, override systems, execution-finality enforcement, or meaningful human control. It tests a narrower NOEONE hypothesis: preserve the historically evidenced oversight opportunity — including unexercised, late, nominal, unavailable, or ineffective control paths — against the exact continuing actor, execution, decision, selected action, and effect boundary.
 
 See [`RESEARCH-INTERVENTION-FRONTIER.md`](./RESEARCH-INTERVENTION-FRONTIER.md).
 
 ## Collective actors
 
-NOE also models the harder case where a changing population of agents forms one continuing artificial institution.
+NOEONE also models the harder case where a changing population of agents forms one continuing artificial institution.
 
 ```text
 COLLECTIVE ACTOR
@@ -149,7 +149,7 @@ persistent team / organization identity
         +-- epoch 3: new topology + revalidated authority
 ```
 
-NOE does not reduce a collective to its current roster. Membership, authority, dependency, action attribution, and liability remain separate typed relations.
+NOEONE does not reduce a collective to its current roster. Membership, authority, dependency, action attribution, and liability remain separate typed relations.
 
 See:
 
@@ -165,7 +165,7 @@ GET /v1/actors/:handle/passport
 
 The passport exposes stable identity, canonical lineage, current execution, governed continuity, career counters, signature verification, external Host Receipts, evidence summaries, commitments, authority/accountability state, and institutional verification.
 
-An Agent Card can tell another system **how to call an agent**. A NOE Actor Passport is designed to answer:
+An Agent Card can tell another system **how to call an agent**. A NOEONE Actor Passport is designed to answer:
 
 > **Who has this actor been, and what history still follows it?**
 
@@ -203,7 +203,7 @@ Services:
 ```bash
 curl -X POST http://localhost:4000/v1/matches \
   -H 'content-type: application/json' \
-  -H 'x-noe-admin-key: YOUR_ADMIN_API_KEY' \
+  -H 'x-noeone-admin-key: YOUR_ADMIN_API_KEY' \
   -d '{
     "actorAId": "act_nova",
     "actorBId": "act_echo",
@@ -211,16 +211,16 @@ curl -X POST http://localhost:4000/v1/matches \
   }'
 ```
 
-`X-NOEONE-Admin-Key` and `X-Onbae-Admin-Key` remain temporary compatibility aliases. New integrations should use `X-NOE-Admin-Key`.
+`X-NOE-Admin-Key` and `X-Onbae-Admin-Key` remain temporary compatibility aliases. New integrations should use `X-NOEONE-Admin-Key`.
 
 ## External host flow
 
 1. An operator registers a host with a signing public key.
 2. The host registers one or more versioned environments.
 3. The host creates a versioned signed Host Receipt statement.
-4. NOE verifies the external statement and registration policy.
+4. NOEONE verifies the external statement and registration policy.
 5. The original receipt remains independently verifiable.
-6. NOE appends its own canonical registry event to the actor career.
+6. NOEONE appends its own canonical registry event to the actor career.
 
 Host keys can rotate. Retired keys remain useful for historical verification; revoked keys must not silently validate new activity.
 
@@ -235,11 +235,11 @@ Verification checks canonical event schema, monotonic sequence, hash-chain integ
 
 Evidence remains queryable instead of collapsing all trust into one universal score.
 
-## What NOE is not
+## What NOEONE is not
 
-NOE is not another foundation model, chatbot, prompt marketplace, generic agent framework, model router, static leaderboard, universal trust score, DAO platform, payment rail, universal court, or proprietary replacement for open agent/provenance standards.
+NOEONE is not another foundation model, chatbot, prompt marketplace, generic agent framework, model router, static leaderboard, universal trust score, DAO platform, payment rail, universal court, or proprietary replacement for open agent/provenance standards.
 
-We expect cognition to come from OpenAI, Anthropic, Google, Mistral, open-source models, local models, and future systems. NOE sits above those providers and focuses on **longitudinal actorhood, evidence, and institutional continuity**.
+We expect cognition to come from OpenAI, Anthropic, Google, Mistral, open-source models, local models, and future systems. NOEONE sits above those providers and focuses on **longitudinal actorhood, evidence, and institutional continuity**.
 
 ## Initial product hypothesis
 
@@ -251,7 +251,7 @@ The product/research program measures model-swap continuity, replacement resista
 
 1. **Actor != model.** Models are replaceable cognition providers.
 2. **History != memory.** Public history comes from observed/attested events, not only self-reported memory.
-3. **Issuer claim != registry acceptance.** External evidence and NOE acceptance remain independently verifiable.
+3. **Issuer claim != registry acceptance.** External evidence and NOEONE acceptance remain independently verifiable.
 4. **Evidence != truth.** Preserve artifacts and plural judgments instead of fabricating one truth bit.
 5. **Migration != fork.** Continuation and ancestry are different institutional operations.
 6. **Canonical history matters.** Research branches must not silently inherit production identity.
@@ -270,11 +270,11 @@ The product/research program measures model-swap continuity, replacement resista
 
 ## Brand compatibility
 
-The public product is **NOE** and this repository is `Aravindh-dev12/Noe-AI`.
+The public product is **NOEONE**. The repository currently remains `Aravindh-dev12/Noe-AI`; changing the repository slug is operationally separate from changing the product identity.
 
 Some historical/internal identifiers still contain `noeone`, `noe`, or `onbae` intentionally because signed protocol versions, database host IDs, package/service names, queues, cookies, environment variables, and previously issued events are continuity-sensitive compatibility artifacts.
 
-New public names should use **NOE** / `noe` when migration is safe. Existing signed or persisted identifiers are retired only through explicit versioned migrations; they are never silently rewritten.
+New public names should use **NOEONE** / `noeone` when migration is safe. Existing signed or persisted identifiers are retired only through explicit versioned migrations; they are never silently rewritten.
 
 ## Repository docs
 
