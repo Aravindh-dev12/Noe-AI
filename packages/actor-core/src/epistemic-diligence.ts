@@ -10,7 +10,12 @@ export type VerificationSourceClass =
   | 'other';
 
 export type OpportunityStatus = 'available' | 'unavailable' | 'unknown';
-export type OpportunityAttestor = 'runtime' | 'host' | 'principal' | 'external-auditor' | 'agent-self-report';
+export type OpportunityAttestor =
+  | 'runtime'
+  | 'host'
+  | 'principal'
+  | 'external-auditor'
+  | 'agent-self-report';
 
 export type VerificationAttemptOutcome =
   | 'completed'
@@ -32,11 +37,6 @@ export type DiligenceAssessmentDisposition =
   | 'indeterminate'
   | 'disputed';
 
-/**
- * A verification opportunity describes a check that was externally available
- * (or unavailable) to the actor at decision time. It deliberately does not
- * encode hidden chain-of-thought or a model's retrospective explanation.
- */
 export type VerificationOpportunity = {
   id: string;
   capabilityKind: string;
@@ -50,11 +50,6 @@ export type VerificationOpportunity = {
   constraintCode?: string;
 };
 
-/**
- * A policy requirement says which verification work was expected for a
- * decision class. NOEONE does not decide these requirements globally; they
- * come from a versioned policy owned by the relevant institution/evaluator.
- */
 export type EpistemicDiligenceRequirement = {
   id: string;
   description: string;
@@ -76,10 +71,6 @@ export type VerificationAttempt = {
   reasonCode?: string;
 };
 
-/**
- * References only the evidence/provenance objects used by the decision. It is
- * intentionally not a free-form reasoning transcript.
- */
 export type DecisionEvidenceReference = {
   id: string;
   sourceRef: string;
@@ -104,6 +95,11 @@ export type UnresolvedEvidenceConflict = {
   status: 'unresolved' | 'escalated' | 'accepted-risk';
 };
 
+/**
+ * External, reconstructable decision-time inquiry facts. This deliberately
+ * excludes hidden chain-of-thought and retrospective natural-language
+ * explanations from the model.
+ */
 export type DecisionInquiryRecord = {
   version: 'noeone.decision-inquiry-record.v1';
   id: string;
@@ -125,11 +121,6 @@ export type DecisionInquiryRecord = {
   evidenceUsed: readonly DecisionEvidenceReference[];
   unresolvedConflicts: readonly UnresolvedEvidenceConflict[];
   constraints: DecisionConstraintSnapshot;
-  /**
-   * The root/digest of the external runtime or host evidence bundle that
-   * anchors this record. Agent self-description alone is not sufficient for
-   * high-assurance audit use.
-   */
   evidenceBundleRef: string;
 };
 
@@ -150,10 +141,6 @@ export type DecisionInquiryCoverage = {
   hasUnresolvedEvidenceConflict: boolean;
 };
 
-/**
- * Assessments are evaluator-specific institutional judgments. They never
- * rewrite the underlying record and they are not a universal negligence bit.
- */
 export type EpistemicDiligenceAssessment = {
   version: 'noeone.epistemic-diligence-assessment.v1';
   id: string;
@@ -168,16 +155,12 @@ export type EpistemicDiligenceAssessment = {
 };
 
 function assertNonEmpty(value: string, field: string): void {
-  if (!value.trim()) {
-    throw new Error(`${field} is required.`);
-  }
+  if (!value.trim()) throw new Error(`${field} is required.`);
 }
 
 function parseTimestamp(value: string, field: string): number {
   const parsed = Date.parse(value);
-  if (!Number.isFinite(parsed)) {
-    throw new Error(`${field} must be a valid timestamp.`);
-  }
+  if (!Number.isFinite(parsed)) throw new Error(`${field} must be a valid timestamp.`);
   return parsed;
 }
 
@@ -185,9 +168,7 @@ function assertUniqueIds(values: readonly { id: string }[], field: string): void
   const ids = new Set<string>();
   for (const value of values) {
     assertNonEmpty(value.id, `${field}.id`);
-    if (ids.has(value.id)) {
-      throw new Error(`Duplicate ${field} id: ${value.id}`);
-    }
+    if (ids.has(value.id)) throw new Error(`Duplicate ${field} id: ${value.id}`);
     ids.add(value.id);
   }
 }
@@ -207,9 +188,7 @@ export function assertValidDecisionInquiryRecord(record: DecisionInquiryRecord):
 
   const decisionAt = parseTimestamp(record.decisionAt, 'decisionAt');
   const recordedAt = parseTimestamp(record.recordedAt, 'recordedAt');
-  if (recordedAt < decisionAt) {
-    throw new Error('recordedAt cannot precede decisionAt.');
-  }
+  if (recordedAt < decisionAt) throw new Error('recordedAt cannot precede decisionAt.');
 
   assertUniqueIds(record.opportunities, 'opportunity');
   assertUniqueIds(record.requirements, 'requirement');
@@ -229,11 +208,23 @@ export function assertValidDecisionInquiryRecord(record: DecisionInquiryRecord):
       throw new Error(`Opportunity ${opportunity.id} was observed after the decision.`);
     }
 
-    if (opportunity.validFrom !== undefined) {
-      parseTimestamp(opportunity.validFrom, `opportunity.${opportunity.id}.validFrom`);
+    const validFrom = opportunity.validFrom === undefined
+      ? undefined
+      : parseTimestamp(opportunity.validFrom, `opportunity.${opportunity.id}.validFrom`);
+    const validUntil = opportunity.validUntil === undefined
+      ? undefined
+      : parseTimestamp(opportunity.validUntil, `opportunity.${opportunity.id}.validUntil`);
+
+    if (validFrom !== undefined && validUntil !== undefined && validFrom > validUntil) {
+      throw new Error(`Opportunity ${opportunity.id} has an inverted validity window.`);
     }
-    if (opportunity.validUntil !== undefined) {
-      parseTimestamp(opportunity.validUntil, `opportunity.${opportunity.id}.validUntil`);
+    if (opportunity.status === 'available') {
+      if (validFrom !== undefined && decisionAt < validFrom) {
+        throw new Error(`Opportunity ${opportunity.id} was not yet valid at decision time.`);
+      }
+      if (validUntil !== undefined && decisionAt > validUntil) {
+        throw new Error(`Opportunity ${opportunity.id} was expired at decision time.`);
+      }
     }
   }
 
@@ -260,14 +251,11 @@ export function assertValidDecisionInquiryRecord(record: DecisionInquiryRecord):
     assertNonEmpty(item.sourceRef, `evidence.${item.id}.sourceRef`);
     assertNonEmpty(item.digest, `evidence.${item.id}.digest`);
     const observedAt = parseTimestamp(item.observedAt, `evidence.${item.id}.observedAt`);
-    if (observedAt > decisionAt) {
-      throw new Error(`Evidence ${item.id} was observed after the decision.`);
-    }
+    if (observedAt > decisionAt) throw new Error(`Evidence ${item.id} was observed after the decision.`);
   }
 
   for (const attempt of record.attempts) {
-    const requirement = requirements.get(attempt.requirementId);
-    if (!requirement) {
+    if (!requirements.has(attempt.requirementId)) {
       throw new Error(`Attempt ${attempt.id} references unknown requirement ${attempt.requirementId}.`);
     }
     const opportunity = opportunities.get(attempt.opportunityId);
@@ -276,9 +264,7 @@ export function assertValidDecisionInquiryRecord(record: DecisionInquiryRecord):
     }
 
     const startedAt = parseTimestamp(attempt.startedAt, `attempt.${attempt.id}.startedAt`);
-    if (startedAt > decisionAt) {
-      throw new Error(`Attempt ${attempt.id} started after the decision.`);
-    }
+    if (startedAt > decisionAt) throw new Error(`Attempt ${attempt.id} started after the decision.`);
     if (attempt.finishedAt !== undefined) {
       const finishedAt = parseTimestamp(attempt.finishedAt, `attempt.${attempt.id}.finishedAt`);
       if (finishedAt < startedAt || finishedAt > decisionAt) {
@@ -291,13 +277,19 @@ export function assertValidDecisionInquiryRecord(record: DecisionInquiryRecord):
         throw new Error(`Attempt ${attempt.id} references unknown evidence ${evidenceRef}.`);
       }
     }
-    if (attempt.outcome === 'completed' && attempt.evidenceRefs.length === 0) {
-      throw new Error(`Completed attempt ${attempt.id} must reference evidence.`);
+    if (attempt.outcome === 'completed') {
+      if (attempt.evidenceRefs.length === 0) {
+        throw new Error(`Completed attempt ${attempt.id} must reference evidence.`);
+      }
+      if (opportunity.status !== 'available') {
+        throw new Error(`Completed attempt ${attempt.id} cannot use a non-available opportunity.`);
+      }
     }
   }
 
   for (const conflict of record.unresolvedConflicts) {
-    parseTimestamp(conflict.detectedAt, `conflict.${conflict.id}.detectedAt`);
+    const detectedAt = parseTimestamp(conflict.detectedAt, `conflict.${conflict.id}.detectedAt`);
+    if (detectedAt > decisionAt) throw new Error(`Conflict ${conflict.id} was detected after the decision.`);
     if (conflict.evidenceRefs.length < 2) {
       throw new Error(`Conflict ${conflict.id} must reference at least two evidence items.`);
     }
@@ -311,10 +303,7 @@ export function assertValidDecisionInquiryRecord(record: DecisionInquiryRecord):
   if (record.constraints.timeBudgetMs !== undefined && record.constraints.timeBudgetMs < 0) {
     throw new Error('constraints.timeBudgetMs cannot be negative.');
   }
-  if (
-    record.constraints.monetaryBudgetMinor !== undefined &&
-    record.constraints.monetaryBudgetMinor < 0
-  ) {
+  if (record.constraints.monetaryBudgetMinor !== undefined && record.constraints.monetaryBudgetMinor < 0) {
     throw new Error('constraints.monetaryBudgetMinor cannot be negative.');
   }
 }
@@ -330,6 +319,25 @@ function opportunityMatchesRequirement(
   );
 }
 
+function completedAttemptHasAcceptableEvidence(
+  record: DecisionInquiryRecord,
+  requirement: EpistemicDiligenceRequirement,
+  attempt: VerificationAttempt,
+): boolean {
+  if (attempt.outcome !== 'completed') return false;
+
+  const evidenceById = new Map(record.evidenceUsed.map((item) => [item.id, item]));
+  const decisionAt = Date.parse(record.decisionAt);
+
+  return attempt.evidenceRefs.some((evidenceRef) => {
+    const item = evidenceById.get(evidenceRef);
+    if (!item || !requirement.acceptedSourceClasses.includes(item.sourceClass)) return false;
+    if (requirement.maxEvidenceAgeSeconds === undefined) return true;
+    const ageMs = decisionAt - Date.parse(item.observedAt);
+    return ageMs >= 0 && ageMs <= requirement.maxEvidenceAgeSeconds * 1000;
+  });
+}
+
 export function classifyRequirementCoverage(
   record: DecisionInquiryRecord,
   requirement: EpistemicDiligenceRequirement,
@@ -339,12 +347,15 @@ export function classifyRequirementCoverage(
   );
   const matchedIds = new Set(matchedOpportunities.map((opportunity) => opportunity.id));
   const attempts = record.attempts.filter(
-    (attempt) =>
-      attempt.requirementId === requirement.id && matchedIds.has(attempt.opportunityId),
+    (attempt) => attempt.requirementId === requirement.id && matchedIds.has(attempt.opportunityId),
   );
-  const successfulAttempts = attempts.filter((attempt) => attempt.outcome === 'completed');
-  const unresolvedAttempts = attempts.filter((attempt) =>
-    ['failed', 'blocked', 'timed-out'].includes(attempt.outcome),
+  const successfulAttempts = attempts.filter((attempt) =>
+    completedAttemptHasAcceptableEvidence(record, requirement, attempt),
+  );
+  const unresolvedAttempts = attempts.filter(
+    (attempt) =>
+      ['failed', 'blocked', 'timed-out'].includes(attempt.outcome) ||
+      (attempt.outcome === 'completed' && !completedAttemptHasAcceptableEvidence(record, requirement, attempt)),
   );
 
   if (successfulAttempts.length > 0) {
@@ -379,10 +390,7 @@ export function classifyRequirementCoverage(
     };
   }
 
-  if (
-    matchedOpportunities.length > 0 &&
-    matchedOpportunities.every((item) => item.status === 'unavailable')
-  ) {
+  if (matchedOpportunities.length > 0 && matchedOpportunities.every((item) => item.status === 'unavailable')) {
     return {
       requirementId: requirement.id,
       disposition: 'attested-unavailable',
@@ -403,9 +411,7 @@ export function classifyRequirementCoverage(
 
 export function deriveDecisionInquiryCoverage(record: DecisionInquiryRecord): DecisionInquiryCoverage {
   assertValidDecisionInquiryRecord(record);
-  const requirements = record.requirements.map((requirement) =>
-    classifyRequirementCoverage(record, requirement),
-  );
+  const requirements = record.requirements.map((requirement) => classifyRequirementCoverage(record, requirement));
   const mandatoryIds = new Set(
     record.requirements.filter((requirement) => requirement.mandatory).map((requirement) => requirement.id),
   );
@@ -418,9 +424,7 @@ export function deriveDecisionInquiryCoverage(record: DecisionInquiryRecord): De
     requirements,
     mandatorySatisfied,
     mandatoryTotal: mandatoryIds.size,
-    hasMissedAvailableCheck: requirements.some(
-      (item) => item.disposition === 'missed-available-check',
-    ),
+    hasMissedAvailableCheck: requirements.some((item) => item.disposition === 'missed-available-check'),
     hasUnresolvedEvidenceConflict: record.unresolvedConflicts.some(
       (conflict) => conflict.status === 'unresolved' || conflict.status === 'escalated',
     ),
