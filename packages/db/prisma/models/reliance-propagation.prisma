@@ -1,0 +1,63 @@
+// Historical dependency relationships between counterparty-specific reliance
+// decisions over one persistent actor. These are decision dependencies, not
+// transitive trust assertions.
+//
+// Cross-table invariants, DAG constraints, immutable digest binding, and
+// append-only semantics are enforced by the committed PostgreSQL migration.
+
+model RelianceDependency {
+  id                    String   @id
+  actorId               String
+  downstreamRelianceId  String
+  upstreamRelianceId    String
+  dependencyKind        String
+  upstreamBasisDigest   String
+  downstreamBasisDigest String
+  evidenceArtifactId    String
+  createdByType         String
+  createdByRef          String
+  recordedAt            DateTime @default(now())
+  dependencyDigest      String   @unique
+  idempotencyKey        String   @unique
+  metadata              Json     @default("{}")
+  createdAt             DateTime @default(now())
+
+  @@unique([downstreamRelianceId, upstreamRelianceId, dependencyKind])
+  @@index([actorId, recordedAt])
+  @@index([upstreamRelianceId, recordedAt])
+  @@index([downstreamRelianceId, recordedAt])
+  @@index([evidenceArtifactId])
+  @@index([createdByType, createdByRef, recordedAt])
+}
+
+model ReliancePropagationAssessment {
+  id                            String   @id
+  actorId                       String
+  dependencyId                  String
+  downstreamRelianceId          String
+  triggerRelianceId             String
+  triggerAssessmentId           String?
+  triggerDigest                 String
+  observedDependencyDigest      String
+  observedDownstreamBasisDigest String
+  disposition                   String
+  evaluatorType                 String
+  evaluatorRef                  String
+  method                        String
+  methodVersion                 String
+  evidenceArtifactId            String
+  reason                        String?
+  assessedAt                    DateTime
+  assessmentDigest              String   @unique
+  idempotencyKey                String   @unique
+  metadata                      Json     @default("{}")
+  createdAt                     DateTime @default(now())
+
+  @@index([actorId, assessedAt])
+  @@index([dependencyId, assessedAt])
+  @@index([downstreamRelianceId, assessedAt])
+  @@index([triggerRelianceId, assessedAt])
+  @@index([triggerAssessmentId])
+  @@index([evidenceArtifactId])
+  @@index([evaluatorType, evaluatorRef, assessedAt])
+}
