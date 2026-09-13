@@ -1,0 +1,83 @@
+// C1 persistence for collective actor continuity.
+//
+// These models intentionally use scalar actor/evidence identifiers instead of
+// Prisma relation fields. PostgreSQL migration triggers are the trust boundary:
+// they verify referenced actors/evidence/epochs and enforce temporal and
+// immutability invariants.
+
+model CollectiveProfile {
+  actorId                     String   @id
+  governanceMethod            String
+  formationEvidenceArtifactId String
+  formedAt                    DateTime
+  profileDigest               String   @unique
+  basisDigest                 String
+  idempotencyKey              String   @unique
+  metadata                    Json     @default("{}")
+  createdAt                   DateTime @default(now())
+
+  @@index([formedAt])
+  @@index([formationEvidenceArtifactId])
+}
+
+model CollectiveEpoch {
+  id                           String   @id
+  collectiveActorId            String
+  sequence                     Int
+  predecessorEpochId           String?
+  transitionKind               String
+  constitutionDigest           String
+  topologyDigest               String
+  decisionPolicyDigest         String
+  rosterDigest                 String
+  stateDigest                  String   @unique
+  transitionEvidenceArtifactId String
+  basisDigest                  String
+  idempotencyKey               String   @unique
+  startedAt                    DateTime
+  endedAt                      DateTime?
+  metadata                     Json     @default("{}")
+  createdAt                    DateTime @default(now())
+
+  @@unique([collectiveActorId, sequence])
+  @@index([collectiveActorId, startedAt])
+  @@index([predecessorEpochId])
+  @@index([transitionEvidenceArtifactId])
+}
+
+model CollectiveMembership {
+  id                      String   @id
+  collectiveActorId       String
+  memberActorId           String
+  role                    String
+  weightBps               Int?
+  joinedAt                DateTime
+  leftAt                  DateTime?
+  joinEpochId             String
+  leaveEpochId            String?
+  joinEvidenceArtifactId  String?
+  leaveEvidenceArtifactId String?
+  metadata                Json     @default("{}")
+  createdAt               DateTime @default(now())
+
+  @@index([collectiveActorId, joinedAt])
+  @@index([memberActorId, joinedAt])
+  @@index([joinEpochId])
+  @@index([leaveEpochId])
+}
+
+model CollectiveEpochMembership {
+  epochId           String
+  membershipId      String
+  collectiveActorId String
+  memberActorId     String
+  role              String
+  weightBps         Int?
+  snapshotDigest    String
+  createdAt         DateTime @default(now())
+
+  @@id([epochId, memberActorId])
+  @@unique([epochId, membershipId])
+  @@index([collectiveActorId, epochId])
+  @@index([memberActorId, epochId])
+}
