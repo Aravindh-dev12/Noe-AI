@@ -28,8 +28,9 @@ const registry = {
   issuer: 'noeone-test',
 } as const;
 
-const startedAt = new Date(Date.now() - 60 * 60 * 1000);
-const future = (minutes: number) => new Date(Date.now() + minutes * 60 * 1000);
+const baseTime = Date.now();
+const startedAt = new Date(baseTime - 60 * 60 * 1000);
+const future = (minutes: number) => new Date(baseTime + minutes * 60 * 1000);
 
 beforeAll(async () => {
   await db.host.create({
