@@ -1,0 +1,61 @@
+// Actor-level corrective state attached to a continuing artificial actor.
+//
+// Scalar identifiers are intentional: the PostgreSQL migration provides the
+// foreign-key and semantic integrity boundary, matching other research-stage
+// institutional models in this repository.
+
+model ConsequenceReception {
+  id                          String   @id
+  actorId                     String
+  sourceConsequenceId         String?
+  sourceAttributionId         String?
+  sourceClaimId               String?
+  sourceRemedyId              String?
+  sourceEvidenceArtifactId    String
+  kind                        String
+  status                      String   @default("ACTIVE")
+  scope                       Json
+  termsDigest                 String
+  restorationCriteriaDigest   String?
+  effectiveAt                 DateTime
+  reviewAt                    DateTime?
+  expiresAt                   DateTime?
+  issuedByType                String
+  issuedByRef                 String
+  authorityEvidenceArtifactId String
+  migrationPolicy             String   @default("CARRY_WITH_ACTOR")
+  forkPolicy                  String   @default("DO_NOT_INHERIT")
+  capturedAt                  DateTime
+  basisDigest                 String   @unique
+  idempotencyKey              String   @unique
+  metadata                    Json     @default("{}")
+  createdAt                   DateTime @default(now())
+
+  @@index([actorId, status, effectiveAt])
+  @@index([sourceConsequenceId])
+  @@index([sourceAttributionId])
+  @@index([sourceClaimId])
+  @@index([sourceRemedyId])
+  @@index([sourceEvidenceArtifactId])
+  @@index([authorityEvidenceArtifactId])
+}
+
+model ConsequenceReceptionTransition {
+  id                 String   @id
+  receptionId        String   @unique
+  actorId            String
+  fromStatus         String
+  toStatus           String
+  evidenceArtifactId String
+  decidedByType      String
+  decidedByRef       String
+  reason             String?
+  occurredAt         DateTime
+  basisDigest        String   @unique
+  idempotencyKey     String   @unique
+  metadata           Json     @default("{}")
+  createdAt          DateTime @default(now())
+
+  @@index([actorId, occurredAt])
+  @@index([evidenceArtifactId])
+}
