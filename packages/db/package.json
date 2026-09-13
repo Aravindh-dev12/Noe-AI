@@ -23,6 +23,7 @@
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@onbae/actor-core": "workspace:*",
     "@onbae/event-model": "workspace:*",
     "@prisma/client": "^6.15.0"
   },
