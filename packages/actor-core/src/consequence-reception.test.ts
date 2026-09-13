@@ -35,7 +35,7 @@ function record(
     expiresAt: '2026-10-13T10:00:00.000Z',
     issuedByType: 'organization',
     issuedByRef: 'risk-board:1',
-    authorityEvidenceRef: 'authority:evi_2',
+    authorityEvidenceArtifactId: 'evi_authority_2',
     migrationPolicy: 'carry-with-actor',
     forkPolicy: 'do-not-inherit',
     capturedAt: '2026-09-13T10:00:01.000Z',
