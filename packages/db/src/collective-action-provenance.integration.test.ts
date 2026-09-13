@@ -169,7 +169,7 @@ describe('collective action provenance C2', () => {
         { memberActorId: memberBId, position: 'approve' },
       ],
       idempotencyKey: `collective-c2-decision-initial-${suffix}`,
-    } as const;
+    };
 
     const first = await recordCollectiveDecision(input, registry);
     expect(first.replayed).toBe(false);
