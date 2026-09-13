@@ -50,7 +50,6 @@ CREATE TABLE "ConsequenceReception" (
       "forkPolicy" = 'DO_NOT_INHERIT'
     ),
     CONSTRAINT "ConsequenceReception_time_check" CHECK (
-      "capturedAt" >= "effectiveAt" AND
       ("reviewAt" IS NULL OR "reviewAt" >= "effectiveAt") AND
       ("expiresAt" IS NULL OR "expiresAt" > "effectiveAt")
     ),
@@ -134,18 +133,26 @@ CREATE OR REPLACE FUNCTION noeone_validate_consequence_reception()
 RETURNS TRIGGER AS $$
 DECLARE
   linked_claim_id TEXT;
+  attribution_disposition TEXT;
 BEGIN
   IF NEW."status" <> 'ACTIVE' THEN
     RAISE EXCEPTION 'new consequence reception must start ACTIVE';
   END IF;
 
   IF NEW."sourceAttributionId" IS NOT NULL THEN
-    IF NOT EXISTS (
-      SELECT 1 FROM "ConsequenceAttribution" a
-      WHERE a."id" = NEW."sourceAttributionId"
-        AND a."actorId" = NEW."actorId"
-    ) THEN
+    SELECT a."disposition"::text INTO attribution_disposition
+    FROM "ConsequenceAttribution" a
+    WHERE a."id" = NEW."sourceAttributionId"
+      AND a."actorId" = NEW."actorId";
+
+    IF attribution_disposition IS NULL THEN
       RAISE EXCEPTION 'source attribution does not belong to actor';
+    END IF;
+
+    IF NEW."sourceClaimId" IS NULL
+       AND NEW."sourceRemedyId" IS NULL
+       AND attribution_disposition <> 'SUPPORTED' THEN
+      RAISE EXCEPTION 'direct attribution source must be SUPPORTED';
     END IF;
 
     IF NEW."sourceConsequenceId" IS NOT NULL AND NOT EXISTS (
@@ -230,7 +237,7 @@ CREATE TRIGGER "ConsequenceReception_guard_update"
 BEFORE UPDATE ON "ConsequenceReception"
 FOR EACH ROW EXECUTE FUNCTION noeone_guard_consequence_reception_update();
 
-CREATE OR REPLACE FUNCTION noeone_guard_consequence_reception_delete()
+CREATE OR REPLACE FUNCTION noeone_guard_consequence_reception_history()
 RETURNS TRIGGER AS $$
 BEGIN
   RAISE EXCEPTION 'consequence reception history is append-only';
@@ -239,11 +246,15 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER "ConsequenceReception_guard_delete"
 BEFORE DELETE ON "ConsequenceReception"
-FOR EACH ROW EXECUTE FUNCTION noeone_guard_consequence_reception_delete();
+FOR EACH ROW EXECUTE FUNCTION noeone_guard_consequence_reception_history();
+
+CREATE TRIGGER "ConsequenceReceptionTransition_guard_update"
+BEFORE UPDATE ON "ConsequenceReceptionTransition"
+FOR EACH ROW EXECUTE FUNCTION noeone_guard_consequence_reception_history();
 
 CREATE TRIGGER "ConsequenceReceptionTransition_guard_delete"
 BEFORE DELETE ON "ConsequenceReceptionTransition"
-FOR EACH ROW EXECUTE FUNCTION noeone_guard_consequence_reception_delete();
+FOR EACH ROW EXECUTE FUNCTION noeone_guard_consequence_reception_history();
 
 CREATE OR REPLACE FUNCTION noeone_validate_consequence_reception_transition()
 RETURNS TRIGGER AS $$
@@ -267,8 +278,8 @@ BEGIN
     RAISE EXCEPTION 'transition must consume active consequence reception state';
   END IF;
 
-  IF NEW."occurredAt" < current_record."effectiveAt" THEN
-    RAISE EXCEPTION 'transition cannot precede corrective-state effectiveness';
+  IF NEW."occurredAt" < current_record."capturedAt" THEN
+    RAISE EXCEPTION 'transition cannot precede the captured issuance record';
   END IF;
 
   RETURN NEW;
