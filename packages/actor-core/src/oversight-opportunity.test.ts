@@ -301,9 +301,11 @@ describe('Intervention Attempt', () => {
   });
 
   it('requires a successful attempt to include its completion time', () => {
-    expect(() =>
-      assertValidInterventionAttemptRecord(attempt({ completedAt: undefined }), frontier()),
-    ).toThrow(/must include completedAt/);
+    const withoutCompletedAt = attempt();
+    delete withoutCompletedAt.completedAt;
+    expect(() => assertValidInterventionAttemptRecord(withoutCompletedAt, frontier())).toThrow(
+      /must include completedAt/,
+    );
   });
 
   it('rejects success when completion occurs after effect finality', () => {
