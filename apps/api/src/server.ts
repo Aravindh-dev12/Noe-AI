@@ -33,6 +33,7 @@ import { oversightOpportunityRoutes } from './routes/oversight-opportunity.js';
 import { passportRoutes } from './routes/passports.js';
 import { publicRoutes } from './routes/public.js';
 import { recognitionContinuityRoutes } from './routes/recognition-continuity.js';
+import { reliancePropagationRoutes } from './routes/reliance-propagation.js';
 import { relianceProvenanceRoutes } from './routes/reliance-provenance.js';
 import { verificationRoutes } from './routes/verification.js';
 
@@ -117,6 +118,7 @@ await capabilityContinuityRoutes(app);
 await accountabilityRoutes(app);
 await consequenceReceptionRoutes(app);
 await relianceProvenanceRoutes(app);
+await reliancePropagationRoutes(app);
 await epistemicDiligenceRoutes(app);
 await decisionForeseeabilityRoutes(app);
 await oversightOpportunityRoutes(app);
