@@ -180,7 +180,13 @@ export async function collectiveActionProvenanceRoutes(app: FastifyInstance) {
         outcomeDigest: input.outcomeDigest,
         decidedAt: input.decidedAt,
         evidenceArtifactId: input.evidenceArtifactId,
-        participants: input.participants,
+        participants: input.participants.map((participant) => ({
+          memberActorId: participant.memberActorId,
+          ...(participant.position !== undefined ? { position: participant.position } : {}),
+          ...(participant.evidenceArtifactId !== undefined
+            ? { evidenceArtifactId: participant.evidenceArtifactId }
+            : {}),
+        })),
         idempotencyKey: input.idempotencyKey,
         metadata: input.metadata ?? {},
         ...(input.methodVersion !== undefined ? { methodVersion: input.methodVersion } : {}),
