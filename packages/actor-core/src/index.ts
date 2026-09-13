@@ -255,3 +255,4 @@ export * from './decision-frontier.js';
 export * from './foreseeability-provenance.js';
 export * from './oversight-opportunity.js';
 export * from './consequence-reception.js';
+export * from './reliance-provenance.js';

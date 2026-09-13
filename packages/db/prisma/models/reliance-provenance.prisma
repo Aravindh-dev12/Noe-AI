@@ -1,0 +1,78 @@
+// Counterparty-specific historical reliance over one exact persistent-actor state.
+//
+// Scalar identifiers are intentional. PostgreSQL migrations enforce cross-table
+// actor/execution/lineage/evidence integrity and append-only semantics, matching
+// the other research-stage institutional domains in this repository.
+
+model RelianceBasis {
+  id                       String   @id
+  actorId                  String
+  counterpartyType         String
+  counterpartyRef          String
+  relationKind             String
+  reliedAt                 DateTime
+  validUntil               DateTime?
+  lineageId                String
+  executionId              String
+  executionConfigHash      String
+  actorOwnerId             String?
+  observedEventSequence    Int
+  disclosureBundleDigest   String
+  capabilitySnapshotDigest String?
+  authoritySnapshotDigest  String?
+  controlSnapshotDigest    String?
+  correctiveStateDigest    String?
+  dependencySnapshotDigest String?
+  basisEvidenceArtifactId  String
+  actorStateDigest         String
+  basisDigest              String   @unique
+  idempotencyKey           String   @unique
+  supersedesRelianceId     String?  @unique
+  capturedAt               DateTime
+  metadata                 Json     @default("{}")
+  createdAt                DateTime @default(now())
+
+  @@index([actorId, reliedAt])
+  @@index([actorId, counterpartyType, counterpartyRef, reliedAt])
+  @@index([executionId])
+  @@index([lineageId])
+  @@index([basisEvidenceArtifactId])
+}
+
+model RelianceChangeAssessment {
+  id                                String   @id
+  relianceId                        String
+  actorId                           String
+  successorLineageId                String
+  successorExecutionId              String
+  successorExecutionConfigHash      String
+  successorActorOwnerId             String?
+  successorEventSequence            Int
+  successorDisclosureBundleDigest   String
+  successorCapabilitySnapshotDigest String?
+  successorAuthoritySnapshotDigest  String?
+  successorControlSnapshotDigest    String?
+  successorCorrectiveStateDigest    String?
+  successorDependencySnapshotDigest String?
+  successorStateDigest              String
+  structuralChanges                 Json
+  disposition                       String
+  evaluatorType                     String
+  evaluatorRef                      String
+  method                            String
+  methodVersion                     String
+  evidenceArtifactId                String
+  reason                            String?
+  assessedAt                        DateTime
+  basisDigest                       String   @unique
+  idempotencyKey                    String   @unique
+  metadata                          Json     @default("{}")
+  createdAt                         DateTime @default(now())
+
+  @@index([relianceId, assessedAt])
+  @@index([actorId, assessedAt])
+  @@index([successorExecutionId])
+  @@index([successorLineageId])
+  @@index([evidenceArtifactId])
+  @@index([evaluatorType, evaluatorRef, assessedAt])
+}

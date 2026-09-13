@@ -189,9 +189,6 @@ export function assertValidConsequenceReceptionTransition(
   if (transition.fromStatus !== 'active') {
     throw new Error('V1 only permits transitions from active corrective state.');
   }
-  if (transition.toStatus === 'active') {
-    throw new Error('Transition must move to a terminal corrective state.');
-  }
 
   const occurredAt = timestamp(transition.occurredAt, 'transition.occurredAt');
   if (occurredAt < timestamp(record.capturedAt, 'capturedAt')) {
