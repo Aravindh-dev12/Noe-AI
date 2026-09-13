@@ -212,7 +212,8 @@ function parseStructuralChanges(value: Prisma.JsonValue): RelianceStructuralChan
       typeof item !== 'string' ||
       !STRUCTURAL_CHANGES.includes(item as RelianceStructuralChange)
     ) {
-      throw new RelianceSignalConflictError(`Stored structural change ${String(item)} is invalid.`);
+      const itemLabel = typeof item === 'string' ? item : canonicalJson(item);
+      throw new RelianceSignalConflictError(`Stored structural change ${itemLabel} is invalid.`);
     }
     if (seen.has(item)) {
       throw new RelianceSignalConflictError(`Stored structural change ${item} is duplicated.`);
@@ -492,7 +493,7 @@ export async function emitRelianceSignal(
         successorLineageId: core.successorLineageId,
         successorExecutionId: core.successorExecutionId,
         successorEventSequence: core.successorEventSequence,
-        structuralChanges: core.structuralChanges as Prisma.InputJsonValue,
+        structuralChanges: core.structuralChanges,
         disposition: dispositionToDb(core.disposition),
         emittedAt: new Date(core.emittedAt),
         signalDigest: core.signalDigest,
