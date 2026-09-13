@@ -275,14 +275,18 @@ export async function getOutcomeForecast(id: string) {
 }
 
 export async function listDecisionOutcomeForecasts(frontierRecordId: string, limit = 100) {
+  const frontier = await getDecisionFrontier(frontierRecordId);
+  if (!frontier) return null;
+
   const events = await db.actorEvent.findMany({
-    where: { type: FORECAST_EVENT_TYPE },
+    where: { actorId: frontier.record.actorId, type: FORECAST_EVENT_TYPE },
     orderBy: [{ occurredAt: 'asc' }, { sequence: 'asc' }],
-    take: Math.max(1, Math.min(limit, 250)),
+    take: Math.max(1, Math.min(limit * 4, 500)),
   });
   return events
     .map((event) => ({ event, ...readForecast(event) }))
-    .filter((item) => item.record.frontierRecordId === frontierRecordId);
+    .filter((item) => item.record.frontierRecordId === frontierRecordId)
+    .slice(0, Math.max(1, Math.min(limit, 100)));
 }
 
 export async function recordForeseeabilityAssessment(
@@ -296,6 +300,19 @@ export async function recordForeseeabilityAssessment(
     throw new DecisionForeseeabilityConflictError('Assessment actor/decision does not match referenced frontier.');
   }
   assertValidForeseeabilityAssessment(assessment, frontier.record.decisionAt);
+
+  const consequence = await db.consequenceObservation.findUnique({
+    where: { id: assessment.consequenceObservationRef },
+    select: { id: true, occurredAt: true },
+  });
+  if (!consequence) {
+    throw Object.assign(new Error('Consequence observation not found.'), { statusCode: 404 });
+  }
+  if (Date.parse(assessment.assessedAt) < consequence.occurredAt.getTime()) {
+    throw new DecisionForeseeabilityConflictError(
+      'Foreseeability assessment cannot predate the consequence it evaluates.',
+    );
+  }
 
   for (const forecastRef of assessment.forecastRecordRefs) {
     const forecast = await getOutcomeForecast(forecastRef);
@@ -348,6 +365,27 @@ export async function recordForeseeabilityAssessment(
   });
 }
 
+export async function getForeseeabilityAssessment(id: string) {
+  const event = await db.actorEvent.findUnique({ where: { sourceKey: assessmentKey(id) } });
+  if (!event || event.type !== ASSESSMENT_EVENT_TYPE) return null;
+  return { event, ...readAssessment(event) };
+}
+
+export async function listDecisionForeseeabilityAssessments(frontierRecordId: string, limit = 100) {
+  const frontier = await getDecisionFrontier(frontierRecordId);
+  if (!frontier) return null;
+
+  const events = await db.actorEvent.findMany({
+    where: { actorId: frontier.record.actorId, type: ASSESSMENT_EVENT_TYPE },
+    orderBy: [{ occurredAt: 'asc' }, { sequence: 'asc' }],
+    take: Math.max(1, Math.min(limit * 4, 500)),
+  });
+  return events
+    .map((event) => ({ event, ...readAssessment(event) }))
+    .filter((item) => item.assessment.decisionFrontierRef === frontierRecordId)
+    .slice(0, Math.max(1, Math.min(limit, 100)));
+}
+
 async function verifyStoredEvent(event: DbActorEvent, signingSecret: string): Promise<boolean> {
   const canonical = toCanonicalActorEvent(event);
   return verifyEventHash(canonical) && verifyEventSignature(canonical, signingSecret);
@@ -370,10 +408,20 @@ export async function verifyDecisionForeseeabilityRecord(
       payloadValid = persisted.recordDigest === sha256Canonical(persisted.record);
     } else if (kind === 'forecast') {
       const persisted = readForecast(event);
-      payloadValid = persisted.recordDigest === sha256Canonical(persisted.record);
+      const frontier = await getDecisionFrontier(persisted.record.frontierRecordId);
+      payloadValid =
+        persisted.recordDigest === sha256Canonical(persisted.record) &&
+        frontier !== null &&
+        persisted.frontierDigest === frontier.recordDigest;
+      if (frontier) assertForecastMatchesDecisionFrontierCandidate(persisted.record, frontier.record);
     } else {
       const persisted = readAssessment(event);
-      payloadValid = persisted.assessmentDigest === sha256Canonical(persisted.assessment);
+      const frontier = await getDecisionFrontier(persisted.assessment.decisionFrontierRef);
+      payloadValid =
+        persisted.assessmentDigest === sha256Canonical(persisted.assessment) && frontier !== null;
+      if (frontier) {
+        assertValidForeseeabilityAssessment(persisted.assessment, frontier.record.decisionAt);
+      }
     }
   } catch {
     payloadValid = false;
