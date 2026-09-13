@@ -200,7 +200,9 @@ function requireDigest(value: string, field: string): string {
 function normalizeDispositions(
   values: ExternalStateContinuationDisposition[] | undefined,
 ): ExternalStateContinuationDisposition[] {
-  const normalized = [...new Set(values ?? ['CONTINUED', 'REISSUED'])].sort();
+  const normalized: ExternalStateContinuationDisposition[] = [
+    ...new Set<ExternalStateContinuationDisposition>(values ?? ['CONTINUED', 'REISSUED']),
+  ].sort();
   if (normalized.length === 0 || normalized.some((value) => !DISPOSITION_SET.has(value))) {
     throw new TransitionClearingValidationError('acceptableDispositions is invalid.');
   }
