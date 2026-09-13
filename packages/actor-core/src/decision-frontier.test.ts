@@ -92,8 +92,9 @@ describe('decision frontier evidence', () => {
   });
 
   it('rejects candidates inserted after the historical decision', () => {
+    const { safeDefaultCandidateId: _safeDefaultCandidateId, ...withoutSafeDefault } = baseFrontier();
     const frontier: DecisionFrontierRecord = {
-      ...baseFrontier(),
+      ...withoutSafeDefault,
       candidates: [
         {
           ...baseFrontier().candidates[0]!,
@@ -101,7 +102,6 @@ describe('decision frontier evidence', () => {
         },
       ],
       selectedCandidateId: 'candidate_play_a',
-      safeDefaultCandidateId: undefined,
     };
 
     expect(() => assertValidDecisionFrontierRecord(frontier)).toThrow(/observed after the decision/);
@@ -131,7 +131,6 @@ describe('decision frontier evidence', () => {
       completeness: 'sampled',
       boundary: {
         ...baseFrontier().boundary,
-        generatorMethodRef: undefined,
       },
       attestor: 'runtime',
     };
