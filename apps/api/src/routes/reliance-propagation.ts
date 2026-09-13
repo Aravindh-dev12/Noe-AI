@@ -11,12 +11,12 @@ import { z } from 'zod';
 
 import { env } from '../env.js';
 import { assertAdmin } from '../lib/auth.js';
+import { jsonMetadataSchema } from '../lib/json.js';
 
 const boundedId = z.string().min(1).max(240);
 const boundedText = z.string().min(1).max(800);
 const digest = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const timestamp = z.string().datetime({ offset: true });
-const metadata = z.record(z.string(), z.unknown()).optional();
 
 const dependencySchema = z
   .object({
@@ -30,7 +30,7 @@ const dependencySchema = z
     createdByType: z.string().min(1).max(120),
     createdByRef: boundedText,
     idempotencyKey: z.string().min(8).max(500),
-    metadata,
+    metadata: jsonMetadataSchema,
   })
   .strict();
 
@@ -52,7 +52,7 @@ const assessmentSchema = z
     reason: z.string().max(4000).nullish(),
     assessedAt: timestamp,
     idempotencyKey: z.string().min(8).max(500),
-    metadata,
+    metadata: jsonMetadataSchema,
   })
   .strict();
 
