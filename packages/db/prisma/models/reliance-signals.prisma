@@ -1,14 +1,14 @@
 // Counterparty-specific change propagation over immutable reliance provenance.
 //
-// Signals bind one Reliance Change Assessment to the exact counterparty that
-// originally relied on the actor. Receipts remain append-only evidence of what
-// happened after signal emission. Transport is metadata, not the trust root.
+// One semantic signal exists per immutable Reliance Change Assessment. Delivery
+// transports are receipt metadata so CAEP/webhook/manual delivery cannot fork
+// the underlying institutional meaning of the signal.
 
 model RelianceSignal {
   id                       String   @id
   actorId                  String
   relianceId               String
-  assessmentId             String
+  assessmentId             String   @unique
   counterpartyType         String
   counterpartyRef          String
   relationKind             String
@@ -19,8 +19,6 @@ model RelianceSignal {
   successorEventSequence   Int
   structuralChanges        Json
   disposition              String
-  transportProfile         String
-  transportRef             String?
   emittedAt                DateTime
   signalDigest             String   @unique
   idempotencyKey           String   @unique
@@ -29,7 +27,6 @@ model RelianceSignal {
 
   @@index([actorId, emittedAt])
   @@index([relianceId, emittedAt])
-  @@index([assessmentId])
   @@index([counterpartyType, counterpartyRef, emittedAt])
   @@index([disposition, emittedAt])
 }
@@ -42,6 +39,8 @@ model RelianceSignalReceipt {
   kind                  String
   partyType             String
   partyRef              String
+  transportProfile      String?
+  transportRef          String?
   evidenceArtifactId    String?
   successorRelianceId   String?
   detailDigest          String?
@@ -55,6 +54,7 @@ model RelianceSignalReceipt {
   @@index([actorId, observedAt])
   @@index([relianceId, observedAt])
   @@index([kind, observedAt])
+  @@index([transportProfile, observedAt])
   @@index([evidenceArtifactId])
   @@index([successorRelianceId])
 }
