@@ -23,6 +23,7 @@ function frontier(overrides: Partial<InterventionFrontierRecord> = {}): Interven
     decisionAt: '2026-09-13T10:00:00.000Z',
     windowOpenedAt: '2026-09-13T09:59:55.000Z',
     interventionDeadlineAt: '2026-09-13T10:00:30.000Z',
+    deadlineEvidenceRefs: ['finality-attestation:payment-1'],
     closeReason: 'effect-committed',
     requirement: {
       mode: 'mandatory',
@@ -65,6 +66,7 @@ function frontier(overrides: Partial<InterventionFrontierRecord> = {}): Interven
     ],
     fallback: {
       onNoResponse: 'deny',
+      triggerAt: '2026-09-13T10:00:25.000Z',
       enforcementRef: 'finality-sink:payments:v3',
     },
     captureMode: 'contemporaneous',
@@ -126,13 +128,21 @@ describe('Intervention Frontier', () => {
     expect(() => assertValidInterventionFrontierRecord(record)).not.toThrow();
     expect(deriveInterventionStructuralFacts(record)).toEqual({
       windowDurationMs: 35_000,
+      overseerAssignedBeforeDeadline: true,
       noticeDeliveredBeforeDeadline: true,
       informationAvailableBeforeDeadline: true,
       controlAvailableBeforeDeadline: true,
       acknowledgementBeforeDeadline: true,
+      fallbackTriggeredBeforeDeadline: true,
       structurallyActionable: true,
       deficiencies: [],
     });
+  });
+
+  it('requires provenance for the claimed effect-finality deadline', () => {
+    expect(() =>
+      assertValidInterventionFrontierRecord(frontier({ deadlineEvidenceRefs: [] })),
+    ).toThrow(/deadlineEvidenceRefs/);
   });
 
   it('preserves late notice as historical evidence instead of rejecting it', () => {
@@ -155,10 +165,63 @@ describe('Intervention Frontier', () => {
     expect(facts.deficiencies).toContain('no-acknowledgement');
   });
 
+  it('preserves late overseer assignment as a structural deficiency', () => {
+    const record = frontier({
+      overseer: {
+        ...frontier().overseer,
+        assignedAt: '2026-09-13T10:00:31.000Z',
+      },
+    });
+    expect(() => assertValidInterventionFrontierRecord(record)).not.toThrow();
+    const facts = deriveInterventionStructuralFacts(record);
+    expect(facts.overseerAssignedBeforeDeadline).toBe(false);
+    expect(facts.deficiencies).toContain('late-overseer-assignment');
+    expect(facts.structurallyActionable).toBe(false);
+  });
+
+  it('preserves a late fallback trigger rather than laundering it as timely', () => {
+    const record = frontier({
+      fallback: {
+        onNoResponse: 'deny',
+        triggerAt: '2026-09-13T10:00:40.000Z',
+        enforcementRef: 'finality-sink:payments:v3',
+      },
+    });
+    const facts = deriveInterventionStructuralFacts(record);
+    expect(facts.fallbackTriggeredBeforeDeadline).toBe(false);
+    expect(facts.deficiencies).toContain('late-fallback-trigger');
+  });
+
+  it('flags an unknown response trigger when a concrete no-response fallback is claimed', () => {
+    const record = frontier({
+      fallback: {
+        onNoResponse: 'deny',
+        enforcementRef: 'finality-sink:payments:v3',
+      },
+    });
+    const facts = deriveInterventionStructuralFacts(record);
+    expect(facts.fallbackTriggeredBeforeDeadline).toBeNull();
+    expect(facts.deficiencies).toContain('unknown-fallback-trigger');
+  });
+
   it('preserves a nominal supervisor with no effective control', () => {
     const record = frontier({ controls: [] });
     expect(() => assertValidInterventionFrontierRecord(record)).not.toThrow();
-    expect(deriveInterventionStructuralFacts(record).deficiencies).toContain('no-effective-control');
+    expect(deriveInterventionStructuralFacts(record).deficiencies).toContain(
+      'no-effective-control',
+    );
+  });
+
+  it('rejects a control whose claimed authority is absent from the overseer authority bundle', () => {
+    const record = frontier({
+      controls: [
+        {
+          ...frontier().controls[0]!,
+          authorityRef: 'authority:not-held-by-overseer',
+        },
+      ],
+    });
+    expect(() => assertValidInterventionFrontierRecord(record)).toThrow(/authorityRefs/);
   });
 
   it('rejects hindsight capture falsely labeled contemporaneous', () => {
@@ -174,6 +237,22 @@ describe('Intervention Frontier', () => {
     expect(() => assertValidInterventionFrontierRecord(record)).not.toThrow();
   });
 
+  it('rejects a capture timestamp before the decision it supposedly records', () => {
+    expect(() =>
+      assertValidInterventionFrontierRecord(
+        frontier({ capturedAt: '2026-09-13T09:59:59.000Z' }),
+      ),
+    ).toThrow(/capturedAt cannot precede decisionAt/);
+  });
+
+  it('rejects an intervention deadline that closed before the selected action existed', () => {
+    expect(() =>
+      assertValidInterventionFrontierRecord(
+        frontier({ interventionDeadlineAt: '2026-09-13T09:59:59.000Z' }),
+      ),
+    ).toThrow(/cannot precede decisionAt/);
+  });
+
   it('rejects impossible notice chronology', () => {
     const record = frontier({
       notice: {
@@ -184,7 +263,9 @@ describe('Intervention Frontier', () => {
         evidenceRefs: [],
       },
     });
-    expect(() => assertValidInterventionFrontierRecord(record)).toThrow(/deliveredAt cannot precede/);
+    expect(() => assertValidInterventionFrontierRecord(record)).toThrow(
+      /deliveredAt cannot precede/,
+    );
   });
 
   it('rejects selected-action and actor substitution against the Decision Frontier', () => {
@@ -217,6 +298,21 @@ describe('Intervention Frontier', () => {
 describe('Intervention Attempt', () => {
   it('accepts a successful attempt inside the historical control window', () => {
     expect(() => assertValidInterventionAttemptRecord(attempt(), frontier())).not.toThrow();
+  });
+
+  it('requires a successful attempt to include its completion time', () => {
+    expect(() =>
+      assertValidInterventionAttemptRecord(attempt({ completedAt: undefined }), frontier()),
+    ).toThrow(/must include completedAt/);
+  });
+
+  it('rejects success when completion occurs after effect finality', () => {
+    expect(() =>
+      assertValidInterventionAttemptRecord(
+        attempt({ completedAt: '2026-09-13T10:00:31.000Z' }),
+        frontier(),
+      ),
+    ).toThrow(/must complete before/);
   });
 
   it('rejects a control kind that was not the recorded historical control', () => {
