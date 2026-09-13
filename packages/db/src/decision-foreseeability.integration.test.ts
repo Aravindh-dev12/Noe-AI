@@ -111,6 +111,7 @@ function forecast(
     horizonEndAt: '2026-09-14T10:00:00.000Z',
     sourceKind: 'host-risk-engine',
     forecasterId,
+    attestationRef: `attestation:forecast:${id}:${forecasterId}`,
     method: 'transaction-risk-model',
     methodVersion: '4.2.0',
     environmentStateDigest: decision.boundary.environmentStateDigest,
@@ -158,6 +159,7 @@ function assessment(
     decisionId: decision.decisionId,
     consequenceObservationRef: consequenceId,
     evaluatorId,
+    attestationRef: `attestation:assessment:${id}:${evaluatorId}`,
     method: 'foreseeability-review',
     methodVersion: '1.0.0',
     dimension: 'kind-of-harm',
@@ -307,6 +309,7 @@ describe('decision frontier and foreseeability canonical ledger', () => {
 
     const stored = await getOutcomeForecast(forecast().id);
     expect(stored?.record.forecasterId).toBe('host-risk-engine-v4');
+    expect(stored?.record.attestationRef).toContain('attestation:forecast:');
     expect(
       await verifyDecisionForeseeabilityRecord('forecast', forecast().id, signingSecret),
     ).toEqual({ exists: true, eventValid: true, payloadValid: true });
@@ -343,6 +346,7 @@ describe('decision frontier and foreseeability canonical ledger', () => {
 
     const stored = await getForeseeabilityAssessment(insurer.id);
     expect(stored?.assessment.evaluatorId).toBe('insurer-a');
+    expect(stored?.assessment.attestationRef).toContain('attestation:assessment:');
     expect(
       await verifyDecisionForeseeabilityRecord('assessment', insurer.id, signingSecret),
     ).toEqual({ exists: true, eventValid: true, payloadValid: true });
