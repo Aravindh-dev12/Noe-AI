@@ -2,15 +2,15 @@
 
 ## Research question
 
-NOEONE can now preserve **what a specific counterparty relied upon** when it decided to authorize, host, insure, hire, certify, follow, transact with, or delegate to a persistent artificial actor.
+NOEONE can preserve **what a specific counterparty relied upon** when it decided to authorize, host, insure, hire, certify, follow, transact with, or delegate to a persistent artificial actor.
 
 That creates the next institutional problem:
 
-> When the actor later changes, how do all counterparties whose reliance may have become stale learn about that change, and how do we preserve evidence of delivery, acknowledgement, review, rejection, renewal, or failure without pretending NOEONE controls their external systems?
+> When the actor later changes, which historical reliance relationships may have become stale, and what evidence exists that each affected counterparty was informed, acknowledged the change, reviewed it, renewed reliance, rejected it, or remained unresolved?
 
 This is not merely notification plumbing.
 
-A persistent actor may have hundreds or millions of active reliance relationships. A model/runtime/controller/capability change can therefore have a **reliance blast radius** even when the actor remains mechanically the same identity.
+A persistent actor may have hundreds or millions of reliance relationships. A model/runtime/controller/capability change can therefore have a **reliance blast radius** even when the actor remains mechanically the same identity.
 
 ```text
 Actor A
@@ -32,7 +32,7 @@ structural drift / evaluator assessment
         +---- R4 may be disputed
 ```
 
-The missing object is not a global trust score. It is a **counterparty-specific change signal bound to a historical reliance basis**.
+The missing object is not a global trust score. It is a **counterparty-specific change signal bound to a historical reliance basis** plus an append-only record of what happened after that signal existed.
 
 ---
 
@@ -40,14 +40,14 @@ The missing object is not a global trust score. It is a **counterparty-specific 
 
 ### OpenID Shared Signals and CAEP already solve continuous event transport
 
-The OpenID Shared Signals Framework provides interoperable event sharing between cooperating peers. The Continuous Access Evaluation Profile (CAEP) defines security events that receivers can use to attenuate access, including session revocation, token-claims change, credential change, assurance-level change, and device-compliance change.
+The OpenID Shared Signals Framework provides interoperable event sharing between cooperating peers. The Continuous Access Evaluation Profile (CAEP) defines security events receivers can use to attenuate access, including session revocation, token-claims change, credential change, assurance-level change, and device-compliance change.
 
 Sources:
 - https://openid.net/wg/sharedsignals/specifications/
 - https://openid.net/specs/openid-caep-1_0-04.html
 - https://openid.net/specs/openid-caep-interoperability-profile-1_0.html
 
-NOEONE should **not** build a proprietary replacement for Shared Signals. A future transport adapter may serialize NOEONE reliance signals through SSF/CAEP-compatible infrastructure when appropriate.
+NOEONE should **not** build a proprietary replacement for Shared Signals. A future transport adapter may serialize a NOEONE signal through SSF/CAEP-compatible infrastructure when appropriate.
 
 ### W3C credential status already solves suspension/revocation of credentials
 
@@ -56,21 +56,23 @@ The W3C Bitstring Status List v1.0 provides privacy-preserving publication of cr
 Source:
 - https://www.w3.org/TR/vc-bitstring-status-list/
 
-A credential being revoked is not the same question as whether a counterparty's historical reliance on a persistent actor still applies after the actor changes. NOEONE should reference credential status as evidence, not duplicate it.
+A credential being revoked is not the same question as whether a specific counterparty's historical reliance on a persistent actor still applies after the actor changes. NOEONE should reference credential status as evidence, not duplicate it.
 
 ### Agent authorization work is moving toward lifecycle-aware revocation
 
-The 2026 IETF Agent Identity Protocol draft includes registry-backed revocation checks, including full, principal, and scope revocation semantics.
+2026 agent identity and authorization drafts increasingly include scoped/cascade revocation and propagation semantics.
 
-Source:
+Sources:
 - https://datatracker.ietf.org/doc/draft-singla-agent-identity-protocol/
+- https://datatracker.ietf.org/doc/draft-chen-oauth-agent-revocation/
+- https://datatracker.ietf.org/doc/draft-fane-opena2a-aap/
 
 The AITH research proposal similarly treats delegation as continuously bounded and describes push-based revocation.
 
 Source:
 - https://arxiv.org/abs/2604.07695
 
-Again, NOEONE should not claim to invent revocation.
+Again, NOEONE should not claim to invent revocation or propagation.
 
 ### Enterprise governance already expects change-triggered reassessment
 
@@ -99,7 +101,8 @@ Existing systems can increasingly answer:
 - did a policy engine revoke a scope?;
 - can a signal be delivered between cooperating peers?;
 - did an agent identity or key change?;
-- was a deployment recertified?;
+- did a delegation cascade get revoked?;
+- was a deployment recertified?
 
 NOEONE's narrower longitudinal question is:
 
@@ -122,7 +125,7 @@ materiality = contextual
 
 A model swap may be irrelevant to a fan, review-worthy to a game host, and disqualifying to a certification authority.
 
-Therefore a Reliance Signal should usually be emitted **from a recorded Reliance Change Assessment**, not from a global NOEONE decision that the actor has become unsafe or untrusted.
+Therefore a Reliance Signal should normally be emitted **from a recorded Reliance Change Assessment**, not from a global NOEONE decision that the actor has become unsafe or untrusted.
 
 The assessment supplies:
 
@@ -133,13 +136,33 @@ The assessment supplies:
 - evaluator-specific disposition;
 - supporting evidence.
 
-The signal transports that already-bounded claim to the counterparty that originally relied on the actor.
+The signal freezes that already-bounded claim for the counterparty that originally relied on the actor.
 
 ---
 
 ## 4. Primitive A: Reliance Signal
 
-A `RelianceSignal` is an immutable statement that one recorded reliance relationship has a later change assessment that should be surfaced to its original counterparty.
+A `RelianceSignal` is one immutable semantic statement that one recorded reliance relationship has one later change assessment that should be surfaced to its original counterparty.
+
+### Critical design rule: signal semantics are transport-independent
+
+A Reliance Signal does **not** contain CAEP/webhook/manual delivery identity.
+
+If the same change is attempted over three transports, NOEONE must still have one semantic signal:
+
+```text
+                 Reliance Signal S1
+                        |
+          +-------------+-------------+
+          |             |             |
+          v             v             v
+       CAEP          webhook        manual
+          |             |             |
+          v             v             v
+     receipt D1     receipt D2     receipt D3
+```
+
+Otherwise transport retry would create multiple institutional truths and inflate blast-radius counts.
 
 Suggested V1 shape:
 
@@ -164,23 +187,16 @@ RelianceSignal
   structuralChanges[]
   disposition
 
-  transportProfile?
-    INTERNAL
-    SSF
-    CAEP
-    WEBHOOK
-    MANUAL
-    OTHER
-  transportRef?
-
   emittedAt
   signalDigest
   idempotencyKey
 ```
 
-### Why one signal per reliance edge?
+### One signal per assessment
 
-Because privacy and semantics are counterparty-specific. A bank's authorization relationship should not be published merely because another party follows the same actor.
+Each Reliance Change Assessment already refers to one immutable Reliance Basis. Therefore V1 enforces one semantic signal per assessment.
+
+Multiple transports or delivery attempts create receipts, not additional signals.
 
 ### Why bind to an assessment?
 
@@ -188,7 +204,7 @@ NOEONE should not turn a raw configuration diff into a universal normative judgm
 
 ### Why copy semantic facts into the signal?
 
-The signal should remain independently interpretable even if the source assessment is later queried through another service. Its digest commits to the assessment ID, source basis, successor state, structural changes, disposition, counterparty, and emission time.
+The signal remains independently interpretable. Its digest commits to the assessment, source basis, successor state, structural changes, disposition, counterparty, and emission time.
 
 ---
 
@@ -217,6 +233,16 @@ RelianceSignalReceipt
 
   partyType
   partyRef
+
+  transportProfile?
+    INTERNAL
+    SSF
+    CAEP
+    WEBHOOK
+    MANUAL
+    OTHER
+  transportRef?
+
   evidenceArtifactId?
   successorRelianceId?
   detailDigest?
@@ -226,16 +252,18 @@ RelianceSignalReceipt
   idempotencyKey
 ```
 
-These are evidence records, not universal truth declarations.
+Rules:
 
-For example:
-
-- `DELIVERED` means a transport or operator produced evidence that the signal reached a destination;
-- `ACKNOWLEDGED` means the named party produced evidence of acknowledgement;
+- `DELIVERED` / `DELIVERY_FAILED` require a transport profile;
+- a transport reference cannot exist without a transport profile;
+- delivery evidence may be issued by the transport/operator;
+- `ACKNOWLEDGED`, `REVIEW_STARTED`, `RELIANCE_RENEWED`, and `RELIANCE_REJECTED` must be attributable to the **original relying counterparty**;
 - `REVIEW_STARTED` does not imply renewal;
 - `RELIANCE_RENEWED` must reference a new Reliance Basis that explicitly supersedes the historical reliance;
-- `RELIANCE_REJECTED` means that party chose not to continue that reliance relationship;
-- `DELIVERY_FAILED` preserves failed propagation rather than hiding it.
+- `DELIVERY_FAILED` is preserved instead of hidden;
+- non-expiry receipts require evidence.
+
+These are evidence records, not universal truth declarations.
 
 ---
 
@@ -248,15 +276,15 @@ The authoritative history is append-only:
 ```text
 Signal emitted
       |
-      +--> delivered
-      |      |
-      |      +--> acknowledged
-      |              |
-      |              +--> review started
-      |                       |
-      |                       +--> renewed
+      +--> delivery failed via webhook
       |
-      +--> delivery failed
+      +--> delivered via CAEP
+              |
+              +--> acknowledged by counterparty
+                      |
+                      +--> review started
+                              |
+                              +--> renewed
 ```
 
 A read model may derive a current lifecycle state, but the underlying receipts remain immutable.
@@ -298,8 +326,9 @@ A `RELIANCE_RENEWED` receipt is valid only if:
 - R2 exists;
 - R2 concerns the same actor;
 - R2 explicitly supersedes R1;
-- R2 has the same counterparty identity and relation semantics unless an explicit transition policy says otherwise;
-- R2 was captured no earlier than the signal/assessment successor state.
+- R2 has the same counterparty identity and relation semantics;
+- R2 was captured no earlier than the signal;
+- the renewal receipt was observed no earlier than R2.
 
 This makes recertification/reapproval visible as a new historical decision rather than silent mutation.
 
@@ -309,7 +338,7 @@ This makes recertification/reapproval visible as a new historical decision rathe
 
 Once reliance signals exist, NOEONE can compute a powerful but factual query:
 
-> Which active reliance relationships have later assessments whose change signals have not yet reached a terminal counterparty response?
+> Which reliance relationships have later assessments whose change signals have not yet reached a terminal counterparty response?
 
 This is a **reliance blast radius**, not a risk score.
 
@@ -336,7 +365,9 @@ Propagation
    5 delivery failures
 ```
 
-The projection should always retain the evaluator-specific basis. NOEONE must not turn counts into a universal claim that the actor is safe or unsafe.
+The projection retains evaluator-specific materiality. NOEONE must not turn counts into a universal claim that the actor is safe or unsafe.
+
+The aggregate must not silently truncate at a pagination limit. An actor with large institutional reach is exactly where a false partial blast radius becomes dangerous. V1 can compute over the full persisted set; later scale work should move this to incremental/materialized projections rather than silently dropping edges.
 
 ---
 
@@ -344,7 +375,7 @@ The projection should always retain the evaluator-specific basis. NOEONE must no
 
 NOEONE should own the semantic record, not every transport.
 
-V1 can support an internal transport profile and persist external transport references. Later adapters may use:
+Transports may include:
 
 - OpenID Shared Signals / CAEP;
 - enterprise message buses;
@@ -353,9 +384,15 @@ V1 can support an internal transport profile and persist external transport refe
 - email/manual notice evidence;
 - future agent-governance protocols.
 
-A transport adapter must never be allowed to rewrite the historical signal payload.
+A transport adapter must never rewrite the historical signal payload.
 
 A delivery receipt proves only what that transport evidence supports.
+
+### Security boundary
+
+V1 should **not** accept arbitrary outbound webhook URLs and execute them directly. That would create an SSRF/credential-exfiltration boundary and mix semantic provenance with network execution.
+
+Future delivery adapters should use pre-registered destinations, allow-listed schemes/hosts, destination ownership verification, bounded payloads, retry policy, and auditable delivery receipts.
 
 ---
 
@@ -366,12 +403,13 @@ Reliance Signals should resist or expose:
 - **silent material change** — the actor changes while counterparties continue relying on an old state without notice evidence;
 - **broadcast-without-reliance** — a generic notice is presented as proof that a specific relying counterparty was informed;
 - **fake acknowledgement** — delivery is represented as counterparty acknowledgement;
+- **counterparty substitution** — a transport/operator claims acknowledgement on behalf of the relying institution;
 - **renewal laundering** — old reliance is silently treated as renewed without a new basis record;
 - **fork carryover** — a descendant actor inherits another actor's notices/reliance relationships;
-- **signal replay** — the same signal is counted multiple times under different IDs;
+- **signal replay** — one assessment creates several semantic signals and inflates blast-radius counts;
+- **transport-induced identity fork** — CAEP/webhook/manual delivery each produce a different signal digest;
 - **semantic idempotency mutation** — an idempotency key is reused with altered meaning;
 - **assessment substitution** — a signal points to an assessment for another reliance/actor/state;
-- **counterparty substitution** — a signal is delivered to a different party but presented as satisfying the original relying party;
 - **receipt backdating** — acknowledgement/review is recorded before the signal existed;
 - **terminal-state fabrication** — a delivery event is treated as renewal or rejection;
 - **transport monopoly** — NOEONE's semantics become dependent on one proprietary delivery network.
@@ -384,21 +422,26 @@ V1 should enforce:
 
 1. every signal references an existing Reliance Basis;
 2. every signal references an existing Reliance Change Assessment;
-3. basis, assessment, signal, and actor IDs must agree;
+3. basis, assessment, signal, and actor IDs agree;
 4. signal counterparty identity is copied from the immutable basis;
-5. signal successor state/disposition/structural changes must match the immutable assessment;
+5. signal successor state/disposition/structural changes exactly match the immutable assessment;
 6. `emittedAt >= assessment.assessedAt`;
-7. signal semantic idempotency prevents replay with altered meaning;
-8. signal rows are append-only;
-9. every receipt references an existing signal;
-10. receipt actor/reliance IDs must match the signal;
-11. `observedAt >= signal.emittedAt`;
-12. a renewal receipt requires `successorRelianceId`;
-13. the successor reliance must explicitly supersede the signal's original reliance;
-14. the successor reliance must concern the same actor and counterparty;
-15. non-renewal receipts must not smuggle a successor reliance ID;
-16. receipt semantic idempotency prevents replay with altered meaning;
-17. receipt rows are append-only.
+7. one semantic signal exists per assessment;
+8. signal semantic idempotency prevents replay with altered meaning;
+9. signal rows are append-only;
+10. every receipt references an existing signal;
+11. receipt actor/reliance IDs match the signal;
+12. `observedAt >= signal.emittedAt`;
+13. delivery/delivery-failure receipts require transport metadata;
+14. a transport reference requires a transport profile;
+15. acknowledgement/review/renewal/rejection party identity equals the original relying counterparty;
+16. non-expiry receipts require evidence;
+17. a renewal receipt requires `successorRelianceId`;
+18. the successor reliance explicitly supersedes the signal's original reliance;
+19. the successor reliance concerns the same actor, counterparty, and relation;
+20. non-renewal receipts cannot smuggle a successor reliance ID;
+21. receipt semantic idempotency prevents replay with altered meaning;
+22. receipt rows are append-only.
 
 ---
 
@@ -417,21 +460,25 @@ Measure stale overreliance, review behavior, and replacement/renewal choices.
 
 ### B. Reliance blast-radius benchmark
 
-Give one actor 100 synthetic counterparties with different relation kinds and evaluator policies. Perform one migration and measure whether the registry can deterministically identify all reliance edges with non-`UNAFFECTED` assessments and preserve propagation state independently for each.
+Give one actor 100 synthetic counterparties with different relation kinds and evaluator policies. Perform one migration and measure whether the registry deterministically identifies all reliance edges with non-`UNAFFECTED` assessments and preserves propagation state independently for each.
 
 ### C. Delivery is not acknowledgement
 
 Simulate successful transport with no counterparty response. Verify that NOEONE shows `DELIVERED` but never infers `ACKNOWLEDGED`, `RENEWED`, or `REJECTED`.
 
-### D. Renewal integrity
+### D. Counterparty attribution
+
+Let a transport operator produce valid delivery evidence, then attempt to use the same transport identity to record acknowledgement. It must fail; acknowledgement must be attributable to the original relying counterparty.
+
+### E. Renewal integrity
 
 Create a successor reliance basis after review and record a renewal receipt. Attempt to attach a basis that does not supersede the original reliance or belongs to another counterparty; it must fail.
 
-### E. Multi-transport equivalence
+### F. Multi-transport equivalence
 
-Deliver identical immutable signal semantics through internal, webhook-like, and SSF-like adapters. Verify that transport metadata changes but `signalDigest` does not.
+Deliver the same immutable signal through CAEP, webhook-like, and manual adapters. Verify that transport metadata/receipt digests differ while the single `signalDigest` remains unchanged.
 
-### F. Fork non-transfer
+### G. Fork non-transfer
 
 Fork the actor after the original reliance was recorded. The child may prove ancestry but receives no inherited reliance signals or notification obligations by default.
 
@@ -458,7 +505,7 @@ Do **not** say:
 
 The defensible hypothesis is narrower:
 
-> **NOEONE binds change signals to the exact historical reliance relationships of a persistent artificial actor, preserving which counterparties relied on which actor state and what evidence exists that each affected reliance was notified, acknowledged, reviewed, renewed, rejected, or left unresolved across model/runtime/controller changes.**
+> **NOEONE binds one transport-independent change signal to the exact historical reliance relationship of a persistent artificial actor, then preserves evidence of how each relying counterparty was notified, acknowledged, reviewed, renewed, rejected, or left unresolved across model/runtime/controller changes.**
 
 ---
 
