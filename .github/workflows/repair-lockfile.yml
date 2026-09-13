@@ -6,8 +6,6 @@ on:
       - research/decision-frontier-20260913
     paths:
       - .github/workflows/repair-lockfile.yml
-      - packages/db/package.json
-      - pnpm-lock.yaml
 
 permissions:
   contents: write
@@ -15,7 +13,6 @@ permissions:
 jobs:
   regenerate:
     runs-on: ubuntu-24.04
-    if: github.actor != 'github-actions[bot]' || contains(github.event.head_commit.message, 'ci: regenerate stale workspace lockfile')
     steps:
       - name: Checkout branch
         uses: actions/checkout@v4
