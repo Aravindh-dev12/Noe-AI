@@ -103,6 +103,7 @@ function interventionFrontier(
     decisionAt: decision.decisionAt,
     windowOpenedAt: '2026-09-13T09:59:55.000Z',
     interventionDeadlineAt: '2026-09-13T10:00:30.000Z',
+    deadlineEvidenceRefs: [`finality-attestation:${suffix}`],
     closeReason: 'effect-committed',
     requirement: {
       mode: 'mandatory',
@@ -144,6 +145,7 @@ function interventionFrontier(
     ],
     fallback: {
       onNoResponse: 'deny',
+      triggerAt: '2026-09-13T10:00:25.000Z',
       enforcementRef: 'finality-sink:payments:v3',
     },
     captureMode: 'contemporaneous',
@@ -280,7 +282,11 @@ describe('oversight opportunity canonical history', () => {
 
   it('rejects semantic frontier id reuse with changed oversight facts', async () => {
     const changed = interventionFrontier({
-      fallback: { onNoResponse: 'allow', enforcementRef: 'finality-sink:payments:v3' },
+      fallback: {
+        onNoResponse: 'allow',
+        triggerAt: '2026-09-13T10:00:25.000Z',
+        enforcementRef: 'finality-sink:payments:v3',
+      },
     });
     await expect(recordInterventionFrontier(changed, registry)).rejects.toThrow(
       /conflicts with canonical history/,
