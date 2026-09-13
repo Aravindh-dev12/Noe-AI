@@ -34,7 +34,7 @@ export type ConsequenceReceptionRecord = {
   expiresAt?: string;
   issuedByType: string;
   issuedByRef: string;
-  authorityEvidenceRef: string;
+  authorityEvidenceArtifactId: string;
   migrationPolicy: 'carry-with-actor';
   forkPolicy: 'do-not-inherit';
   capturedAt: string;
@@ -118,7 +118,7 @@ export function assertValidConsequenceReceptionRecord(record: ConsequenceRecepti
   assertNonEmpty(record.sourceEvidenceArtifactId, 'sourceEvidenceArtifactId');
   assertNonEmpty(record.issuedByType, 'issuedByType');
   assertNonEmpty(record.issuedByRef, 'issuedByRef');
-  assertNonEmpty(record.authorityEvidenceRef, 'authorityEvidenceRef');
+  assertNonEmpty(record.authorityEvidenceArtifactId, 'authorityEvidenceArtifactId');
   assertSha256(record.termsDigest, 'termsDigest');
   assertSha256(record.basisDigest, 'basisDigest');
   if (record.restorationCriteriaDigest !== undefined) {
@@ -199,13 +199,6 @@ export function assertValidConsequenceReceptionTransition(
   const occurredAt = timestamp(transition.occurredAt, 'transition.occurredAt');
   if (occurredAt < timestamp(record.effectiveAt, 'effectiveAt')) {
     throw new Error('Transition cannot precede corrective-state effectiveness.');
-  }
-
-  if (
-    (transition.toStatus === 'satisfied' || transition.toStatus === 'lifted') &&
-    !transition.evidenceArtifactId.trim()
-  ) {
-    throw new Error('Restoration transitions require evidence.');
   }
 }
 
