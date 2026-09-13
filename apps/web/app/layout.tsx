@@ -24,7 +24,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               <Link href="/">Actors</Link>
               <Link href="/matches">Matches</Link>
               <Link href="/account">My actors</Link>
-              <a href="https://github.com/Aravindh-dev12/NOEONE">GitHub</a>
+              <a href="https://github.com/Aravindh-dev12/Noe-AI">GitHub</a>
             </nav>
           </header>
           <main>{children}</main>

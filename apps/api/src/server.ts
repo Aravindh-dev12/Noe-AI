@@ -28,6 +28,7 @@ import { institutionalSuccessionRoutes } from './routes/institutional-succession
 import { institutionalRoutes } from './routes/institutional.js';
 import { intentContinuityRoutes } from './routes/intent-continuity.js';
 import { matchRoutes } from './routes/matches.js';
+import { oversightOpportunityRoutes } from './routes/oversight-opportunity.js';
 import { passportRoutes } from './routes/passports.js';
 import { publicRoutes } from './routes/public.js';
 import { recognitionContinuityRoutes } from './routes/recognition-continuity.js';
@@ -114,6 +115,7 @@ await capabilityContinuityRoutes(app);
 await accountabilityRoutes(app);
 await epistemicDiligenceRoutes(app);
 await decisionForeseeabilityRoutes(app);
+await oversightOpportunityRoutes(app);
 await dependencyRoutes(app);
 await dependencyImpactRoutes(app);
 await actorResolutionRoutes(app);
