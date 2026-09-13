@@ -17,14 +17,13 @@ const boundedText = z.string().min(1).max(1000);
 const digest = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const timestamp = z.string().datetime({ offset: true });
 const metadata = z.record(z.string(), z.unknown()).optional();
+const transportProfile = z.enum(['internal', 'ssf', 'caep', 'webhook', 'manual', 'other']);
 const listSchema = z
   .object({ limit: z.coerce.number().int().min(1).max(500).default(100) })
   .strict();
 
 const emitSchema = z
   .object({
-    transportProfile: z.enum(['internal', 'ssf', 'caep', 'webhook', 'manual', 'other']),
-    transportRef: boundedText.nullish(),
     emittedAt: timestamp.optional(),
     idempotencyKey: z.string().min(8).max(500),
     metadata,
@@ -44,6 +43,8 @@ const receiptSchema = z
     ]),
     partyType: z.string().min(1).max(120),
     partyRef: boundedText,
+    transportProfile: transportProfile.nullish(),
+    transportRef: boundedText.nullish(),
     evidenceArtifactId: boundedId.nullish(),
     successorRelianceId: boundedId.nullish(),
     detailDigest: digest.nullish(),
@@ -70,8 +71,6 @@ export async function relianceSignalRoutes(app: FastifyInstance) {
     const result = await emitRelianceSignal(
       {
         assessmentId: params.assessmentId,
-        transportProfile: input.transportProfile,
-        transportRef: input.transportRef ?? null,
         ...(input.emittedAt ? { emittedAt: new Date(input.emittedAt) } : {}),
         idempotencyKey: input.idempotencyKey,
         ...(input.metadata ? { metadata: input.metadata } : {}),
@@ -96,6 +95,8 @@ export async function relianceSignalRoutes(app: FastifyInstance) {
         kind: input.kind,
         partyType: input.partyType,
         partyRef: input.partyRef,
+        transportProfile: input.transportProfile ?? null,
+        transportRef: input.transportRef ?? null,
         evidenceArtifactId: input.evidenceArtifactId ?? null,
         successorRelianceId: input.successorRelianceId ?? null,
         detailDigest: input.detailDigest ?? null,
