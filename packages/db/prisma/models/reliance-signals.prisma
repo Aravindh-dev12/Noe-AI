@@ -1,0 +1,60 @@
+// Counterparty-specific change propagation over immutable reliance provenance.
+//
+// Signals bind one Reliance Change Assessment to the exact counterparty that
+// originally relied on the actor. Receipts remain append-only evidence of what
+// happened after signal emission. Transport is metadata, not the trust root.
+
+model RelianceSignal {
+  id                       String   @id
+  actorId                  String
+  relianceId               String
+  assessmentId             String
+  counterpartyType         String
+  counterpartyRef          String
+  relationKind             String
+  originalActorStateDigest String
+  successorStateDigest     String
+  successorLineageId       String
+  successorExecutionId     String
+  successorEventSequence   Int
+  structuralChanges        Json
+  disposition              String
+  transportProfile         String
+  transportRef             String?
+  emittedAt                DateTime
+  signalDigest             String   @unique
+  idempotencyKey           String   @unique
+  metadata                 Json     @default("{}")
+  createdAt                DateTime @default(now())
+
+  @@index([actorId, emittedAt])
+  @@index([relianceId, emittedAt])
+  @@index([assessmentId])
+  @@index([counterpartyType, counterpartyRef, emittedAt])
+  @@index([disposition, emittedAt])
+}
+
+model RelianceSignalReceipt {
+  id                    String   @id
+  signalId              String
+  actorId               String
+  relianceId            String
+  kind                  String
+  partyType             String
+  partyRef              String
+  evidenceArtifactId    String?
+  successorRelianceId   String?
+  detailDigest          String?
+  observedAt            DateTime
+  receiptDigest         String   @unique
+  idempotencyKey        String   @unique
+  metadata              Json     @default("{}")
+  createdAt             DateTime @default(now())
+
+  @@index([signalId, observedAt])
+  @@index([actorId, observedAt])
+  @@index([relianceId, observedAt])
+  @@index([kind, observedAt])
+  @@index([evidenceArtifactId])
+  @@index([successorRelianceId])
+}
