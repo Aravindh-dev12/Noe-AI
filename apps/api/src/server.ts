@@ -34,6 +34,7 @@ import { passportRoutes } from './routes/passports.js';
 import { publicRoutes } from './routes/public.js';
 import { recognitionContinuityRoutes } from './routes/recognition-continuity.js';
 import { relianceProvenanceRoutes } from './routes/reliance-provenance.js';
+import { relianceSignalRoutes } from './routes/reliance-signals.js';
 import { verificationRoutes } from './routes/verification.js';
 
 const app = Fastify({
@@ -117,6 +118,7 @@ await capabilityContinuityRoutes(app);
 await accountabilityRoutes(app);
 await consequenceReceptionRoutes(app);
 await relianceProvenanceRoutes(app);
+await relianceSignalRoutes(app);
 await epistemicDiligenceRoutes(app);
 await decisionForeseeabilityRoutes(app);
 await oversightOpportunityRoutes(app);
