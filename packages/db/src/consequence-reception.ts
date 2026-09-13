@@ -709,10 +709,14 @@ export async function verifyConsequenceReceptionState(actorId: string): Promise<
       const issued = { ...toCoreRecord(reception), status: 'active' as const };
       assertValidConsequenceReceptionRecord(issued);
       const transition = transitionByReception.get(reception.id);
+      // Integrity verification must not depend on the verifier's wall clock.
+      // A terminal row is validated at the transition's own historical point;
+      // live active-state queries remain caller-time based above.
+      const verificationAt = transition?.occurredAt ?? now;
       const projected = projectConsequenceReceptionState(
         issued,
         transition ? [toCoreTransition(transition)] : [],
-        now.toISOString(),
+        verificationAt.toISOString(),
       );
       if (projected.status !== statusFromDb(reception.status)) {
         issues.push(`reception ${reception.id}: stored status does not match transition history`);
