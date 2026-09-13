@@ -35,7 +35,6 @@ export type NoticeDeliveryStatus =
   | 'unknown';
 
 export type NoResponseDisposition = 'allow' | 'deny' | 'pause' | 'escalate' | 'unknown';
-
 export type InterventionCaptureMode = 'contemporaneous' | 'reconstructed';
 
 export type InterventionControl = {
@@ -77,6 +76,7 @@ export type InterventionFrontierRecord = {
   decisionAt: string;
   windowOpenedAt: string;
   interventionDeadlineAt: string;
+  deadlineEvidenceRefs: readonly string[];
   closeReason: InterventionCloseReason;
   requirement: {
     mode: OversightRequirementMode;
@@ -95,6 +95,7 @@ export type InterventionFrontierRecord = {
   controls: readonly InterventionControl[];
   fallback: {
     onNoResponse: NoResponseDisposition;
+    triggerAt?: string;
     enforcementRef?: string;
   };
   captureMode: InterventionCaptureMode;
@@ -163,21 +164,26 @@ export type OversightEffectivenessAssessment = {
 };
 
 export type InterventionStructuralDeficiency =
+  | 'late-overseer-assignment'
   | 'late-notice'
   | 'no-delivered-notice'
   | 'late-information'
   | 'no-effective-control'
   | 'no-acknowledgement'
   | 'late-acknowledgement'
+  | 'late-fallback-trigger'
+  | 'unknown-fallback-trigger'
   | 'control-window-closed'
   | 'unknown-effect-finality';
 
 export type InterventionStructuralFacts = {
   windowDurationMs: number;
+  overseerAssignedBeforeDeadline: boolean;
   noticeDeliveredBeforeDeadline: boolean;
   informationAvailableBeforeDeadline: boolean;
   controlAvailableBeforeDeadline: boolean;
   acknowledgementBeforeDeadline: boolean;
+  fallbackTriggeredBeforeDeadline: boolean | null;
   structurallyActionable: boolean;
   deficiencies: readonly InterventionStructuralDeficiency[];
 };
@@ -214,7 +220,7 @@ function assertOptionalTimestampOrdering(
 }
 
 function assertNoticeStateConsistency(notice: OversightNotice): void {
-  for (const ref of notice.evidenceRefs) assertNonEmpty(ref, 'notice.evidenceRef');
+  assertUniqueStrings(notice.evidenceRefs, 'notice.evidenceRef');
   if (notice.channel !== undefined) assertNonEmpty(notice.channel, 'notice.channel');
 
   if (notice.issuedAt !== undefined) parseTimestamp(notice.issuedAt, 'notice.issuedAt');
@@ -242,7 +248,9 @@ function assertNoticeStateConsistency(notice: OversightNotice): void {
       notice.deliveredAt !== undefined ||
       notice.acknowledgedAt !== undefined
     ) {
-      throw new Error('A not-issued notice cannot contain issue, delivery, or acknowledgement timestamps.');
+      throw new Error(
+        'A not-issued notice cannot contain issue, delivery, or acknowledgement timestamps.',
+      );
     }
   }
   if (
@@ -269,7 +277,13 @@ function assertControl(control: InterventionControl, frontier: InterventionFront
   assertNonEmpty(control.authorityRef, `control.${control.id}.authorityRef`);
   assertNonEmpty(control.enforcementRef, `control.${control.id}.enforcementRef`);
   assertNonEmpty(control.scopeDigest, `control.${control.id}.scopeDigest`);
-  for (const ref of control.evidenceRefs) assertNonEmpty(ref, `control.${control.id}.evidenceRef`);
+  assertUniqueStrings(control.evidenceRefs, `control.${control.id}.evidenceRef`);
+
+  if (!frontier.overseer.authorityRefs.includes(control.authorityRef)) {
+    throw new Error(
+      `control.${control.id}.authorityRef is not present in overseer.authorityRefs.`,
+    );
+  }
 
   const availableFrom = parseTimestamp(control.availableFrom, `control.${control.id}.availableFrom`);
   const availableUntil =
@@ -285,7 +299,7 @@ function assertControl(control: InterventionControl, frontier: InterventionFront
 /**
  * Validates reconstructable historical structure only. A structurally valid
  * record may still describe useless, late, nominal, or non-compliant
- * oversight. Those facts are preserved rather than rejected.
+ * oversight. Those failures must remain recordable.
  */
 export function assertValidInterventionFrontierRecord(record: InterventionFrontierRecord): void {
   if (record.version !== 'noe.intervention-frontier.v1') {
@@ -308,22 +322,26 @@ export function assertValidInterventionFrontierRecord(record: InterventionFronti
     assertNonEmpty(value, field);
   }
 
+  if (record.deadlineEvidenceRefs.length === 0) {
+    throw new Error('deadlineEvidenceRefs must contain at least one provenance reference.');
+  }
+  assertUniqueStrings(record.deadlineEvidenceRefs, 'deadlineEvidenceRef');
+
   const decisionAt = parseTimestamp(record.decisionAt, 'decisionAt');
   const windowOpenedAt = parseTimestamp(record.windowOpenedAt, 'windowOpenedAt');
   const deadlineAt = parseTimestamp(record.interventionDeadlineAt, 'interventionDeadlineAt');
-  const assignedAt = parseTimestamp(record.overseer.assignedAt, 'overseer.assignedAt');
-  const informationAt = parseTimestamp(record.information.availableAt, 'information.availableAt');
+  parseTimestamp(record.overseer.assignedAt, 'overseer.assignedAt');
+  parseTimestamp(record.information.availableAt, 'information.availableAt');
   const capturedAt = parseTimestamp(record.capturedAt, 'capturedAt');
-  void informationAt;
 
   if (deadlineAt < windowOpenedAt) {
     throw new Error('interventionDeadlineAt cannot precede windowOpenedAt.');
   }
-  if (windowOpenedAt > deadlineAt) {
-    throw new Error('Intervention window is invalid.');
+  if (deadlineAt < decisionAt) {
+    throw new Error('interventionDeadlineAt cannot precede decisionAt.');
   }
-  if (assignedAt > deadlineAt && record.requirement.mode === 'mandatory') {
-    // Preserve late assignment as a valid historical failure. No rejection.
+  if (capturedAt < decisionAt) {
+    throw new Error('capturedAt cannot precede decisionAt.');
   }
   if (record.captureMode === 'contemporaneous' && capturedAt > deadlineAt) {
     throw new Error(
@@ -331,16 +349,12 @@ export function assertValidInterventionFrontierRecord(record: InterventionFronti
     );
   }
 
-  // Decision can precede the oversight window, coincide with it, or occur
-  // inside a pre-execution hold. It cannot occur after a claimed window has
-  // already fully closed when the frontier is presented as contemporaneous.
-  if (record.captureMode === 'contemporaneous' && decisionAt > deadlineAt) {
-    throw new Error('A contemporaneous intervention window cannot close before decisionAt.');
-  }
-
   assertUniqueStrings(record.requirement.policyRefs, 'requirement.policyRef');
   assertUniqueStrings(record.overseer.authorityRefs, 'overseer.authorityRef');
-  assertUniqueStrings(record.overseer.competenceEvidenceRefs, 'overseer.competenceEvidenceRef');
+  assertUniqueStrings(
+    record.overseer.competenceEvidenceRefs,
+    'overseer.competenceEvidenceRef',
+  );
   assertUniqueStrings(record.information.evidenceRefs, 'information.evidenceRef');
   assertUniqueStrings(record.information.forecastRefs, 'information.forecastRef');
   if (record.information.explanationRef !== undefined) {
@@ -351,22 +365,21 @@ export function assertValidInterventionFrontierRecord(record: InterventionFronti
 
   const controlIds = new Set<string>();
   for (const control of record.controls) {
-    if (controlIds.has(control.id)) throw new Error(`Duplicate intervention control id: ${control.id}`);
+    if (controlIds.has(control.id)) {
+      throw new Error(`Duplicate intervention control id: ${control.id}`);
+    }
     controlIds.add(control.id);
     assertControl(control, record);
   }
 
+  if (record.fallback.triggerAt !== undefined) {
+    parseTimestamp(record.fallback.triggerAt, 'fallback.triggerAt');
+  }
   if (record.fallback.enforcementRef !== undefined) {
     assertNonEmpty(record.fallback.enforcementRef, 'fallback.enforcementRef');
   }
-  if (
-    record.fallback.onNoResponse !== 'unknown' &&
-    record.fallback.enforcementRef === undefined &&
-    record.requirement.mode === 'mandatory'
-  ) {
-    // A fallback without an enforcement reference is historically possible.
-    // It is classified structurally rather than rejected.
-  }
+  // Missing/late fallback enforcement is a historical governance weakness and
+  // is surfaced as a structural deficiency rather than rejected.
 }
 
 export function assertInterventionFrontierMatchesDecisionFrontier(
@@ -393,14 +406,18 @@ export function assertInterventionFrontierMatchesDecisionFrontier(
     throw new Error('Intervention Frontier decisionAt does not match Decision Frontier.');
   }
   if (record.selectedActionDigest !== frontier.selectedActionDigest) {
-    throw new Error('Intervention Frontier selectedActionDigest does not match Decision Frontier.');
+    throw new Error(
+      'Intervention Frontier selectedActionDigest does not match Decision Frontier.',
+    );
   }
   if (
     record.executionId !== undefined &&
     frontier.executionId !== undefined &&
     record.executionId !== frontier.executionId
   ) {
-    throw new Error('Intervention Frontier executionId does not match Decision Frontier executionId.');
+    throw new Error(
+      'Intervention Frontier executionId does not match Decision Frontier executionId.',
+    );
   }
 }
 
@@ -410,6 +427,7 @@ export function deriveInterventionStructuralFacts(
   assertValidInterventionFrontierRecord(record);
   const deadlineAt = parseTimestamp(record.interventionDeadlineAt, 'interventionDeadlineAt');
   const openedAt = parseTimestamp(record.windowOpenedAt, 'windowOpenedAt');
+  const assignedAt = parseTimestamp(record.overseer.assignedAt, 'overseer.assignedAt');
   const deliveredAt =
     record.notice.deliveredAt === undefined
       ? null
@@ -419,10 +437,17 @@ export function deriveInterventionStructuralFacts(
       ? null
       : parseTimestamp(record.notice.acknowledgedAt, 'notice.acknowledgedAt');
   const informationAt = parseTimestamp(record.information.availableAt, 'information.availableAt');
+  const fallbackTriggerAt =
+    record.fallback.triggerAt === undefined
+      ? null
+      : parseTimestamp(record.fallback.triggerAt, 'fallback.triggerAt');
 
+  const overseerAssignedBeforeDeadline = assignedAt <= deadlineAt;
   const noticeDeliveredBeforeDeadline = deliveredAt !== null && deliveredAt <= deadlineAt;
   const acknowledgementBeforeDeadline = acknowledgedAt !== null && acknowledgedAt <= deadlineAt;
   const informationAvailableBeforeDeadline = informationAt <= deadlineAt;
+  const fallbackTriggeredBeforeDeadline =
+    fallbackTriggerAt === null ? null : fallbackTriggerAt <= deadlineAt;
   const controlAvailableBeforeDeadline = record.controls.some((control) => {
     const from = parseTimestamp(control.availableFrom, `control.${control.id}.availableFrom`);
     const until =
@@ -434,21 +459,29 @@ export function deriveInterventionStructuralFacts(
 
   const deficiencies: InterventionStructuralDeficiency[] = [];
   if (record.closeReason === 'unknown') deficiencies.push('unknown-effect-finality');
+  if (!overseerAssignedBeforeDeadline) deficiencies.push('late-overseer-assignment');
   if (deliveredAt === null) deficiencies.push('no-delivered-notice');
   else if (deliveredAt > deadlineAt) deficiencies.push('late-notice');
   if (!informationAvailableBeforeDeadline) deficiencies.push('late-information');
   if (!controlAvailableBeforeDeadline) deficiencies.push('no-effective-control');
   if (acknowledgedAt === null) deficiencies.push('no-acknowledgement');
   else if (acknowledgedAt > deadlineAt) deficiencies.push('late-acknowledgement');
+  if (record.fallback.onNoResponse !== 'unknown') {
+    if (fallbackTriggerAt === null) deficiencies.push('unknown-fallback-trigger');
+    else if (fallbackTriggerAt > deadlineAt) deficiencies.push('late-fallback-trigger');
+  }
   if (deadlineAt <= openedAt) deficiencies.push('control-window-closed');
 
   return {
     windowDurationMs: Math.max(0, deadlineAt - openedAt),
+    overseerAssignedBeforeDeadline,
     noticeDeliveredBeforeDeadline,
     informationAvailableBeforeDeadline,
     controlAvailableBeforeDeadline,
     acknowledgementBeforeDeadline,
+    fallbackTriggeredBeforeDeadline,
     structurallyActionable:
+      overseerAssignedBeforeDeadline &&
       noticeDeliveredBeforeDeadline &&
       informationAvailableBeforeDeadline &&
       controlAvailableBeforeDeadline &&
@@ -478,8 +511,12 @@ export function assertValidInterventionAttemptRecord(
     assertNonEmpty(value, field);
   }
 
-  if (attempt.frontierId !== frontier.id) throw new Error('Attempt references the wrong Intervention Frontier.');
-  if (attempt.actorId !== frontier.actorId) throw new Error('Attempt actorId does not match Intervention Frontier.');
+  if (attempt.frontierId !== frontier.id) {
+    throw new Error('Attempt references the wrong Intervention Frontier.');
+  }
+  if (attempt.actorId !== frontier.actorId) {
+    throw new Error('Attempt actorId does not match Intervention Frontier.');
+  }
   if (attempt.decisionId !== frontier.decisionId) {
     throw new Error('Attempt decisionId does not match Intervention Frontier.');
   }
@@ -488,7 +525,9 @@ export function assertValidInterventionAttemptRecord(
   }
 
   const control = frontier.controls.find((item) => item.id === attempt.controlId);
-  if (!control) throw new Error(`Attempt references unknown intervention control ${attempt.controlId}.`);
+  if (!control) {
+    throw new Error(`Attempt references unknown intervention control ${attempt.controlId}.`);
+  }
   if (control.kind !== attempt.controlKind) {
     throw new Error('Attempt controlKind does not match the historical intervention control.');
   }
@@ -509,16 +548,33 @@ export function assertValidInterventionAttemptRecord(
     throw new Error('completedAt cannot precede attemptedAt.');
   }
 
-  const outsideEffectiveWindow =
-    attemptedAt < controlFrom || attemptedAt > controlUntil || attemptedAt > deadlineAt;
-  if (outsideEffectiveWindow && attempt.outcome === 'succeeded') {
-    throw new Error('An intervention outside its effective control window cannot be recorded as succeeded.');
+  if (attempt.outcome === 'succeeded' && completedAt === null) {
+    throw new Error('A succeeded intervention must include completedAt.');
   }
+
+  const attemptOutsideEffectiveWindow =
+    attemptedAt < controlFrom || attemptedAt > controlUntil || attemptedAt > deadlineAt;
+  if (attemptOutsideEffectiveWindow && attempt.outcome === 'succeeded') {
+    throw new Error(
+      'An intervention outside its effective control window cannot be recorded as succeeded.',
+    );
+  }
+
+  if (
+    attempt.outcome === 'succeeded' &&
+    completedAt !== null &&
+    (completedAt > controlUntil || completedAt > deadlineAt)
+  ) {
+    throw new Error(
+      'A succeeded intervention must complete before the control window and intervention deadline close.',
+    );
+  }
+
   if (attemptedAt > deadlineAt && attempt.outcome !== 'too-late') {
     throw new Error('An intervention attempted after effect finality must be recorded as too-late.');
   }
 
-  for (const ref of attempt.evidenceRefs) assertNonEmpty(ref, 'attempt.evidenceRef');
+  assertUniqueStrings(attempt.evidenceRefs, 'attempt.evidenceRef');
 }
 
 export function assertValidOversightEffectivenessAssessment(
