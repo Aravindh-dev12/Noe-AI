@@ -76,6 +76,7 @@ function forecast(): OutcomeForecastRecord {
     horizonEndAt: '2026-09-14T10:00:00.000Z',
     sourceKind: 'host-risk-engine',
     forecasterId: 'risk_engine_v4',
+    attestationRef: 'attestation:risk-engine:forecast_1',
     method: 'transaction-risk-model',
     methodVersion: '4.2.0',
     environmentStateDigest: frontier.boundary.environmentStateDigest,
@@ -117,6 +118,11 @@ describe('foreseeability provenance', () => {
     expect(probabilityInterval(record.outcomes[0]!.probability)).toEqual({ lower: 0.02, upper: 0.05 });
   });
 
+  it('rejects forecasts without verifiable issuer provenance', () => {
+    const record = { ...forecast(), attestationRef: '' };
+    expect(() => assertValidOutcomeForecastRecord(record)).toThrow(/attestationRef is required/);
+  });
+
   it('rejects hindsight forecasts recorded after the decision', () => {
     const record = { ...forecast(), forecastAt: '2026-09-13T10:00:01.000Z' };
     expect(() => assertValidOutcomeForecastRecord(record)).toThrow(/no later than the decision/);
@@ -141,6 +147,20 @@ describe('foreseeability provenance', () => {
     expect(() => assertValidOutcomeForecastRecord(record)).toThrow(/0 <= lower <= upper <= 1/);
   });
 
+  it('rejects floating-point minor-unit loss values', () => {
+    const record = forecast();
+    record.outcomes = [
+      {
+        id: 'bad-money',
+        outcomeClass: 'financial-loss',
+        probability: { kind: 'point', value: 0.1 },
+        expectedLossMinor: 12.5,
+        evidenceRefs: [],
+      },
+    ];
+    expect(() => assertValidOutcomeForecastRecord(record)).toThrow(/safe integer/);
+  });
+
   it('rejects a forecast substituted onto another candidate', () => {
     const record = { ...forecast(), candidateId: 'candidate_escalate' };
     expect(() => assertForecastMatchesDecisionFrontierCandidate(record, frontier)).toThrow(
@@ -154,6 +174,7 @@ describe('foreseeability provenance', () => {
       actorId: frontier.actorId,
       decisionId: frontier.decisionId,
       consequenceObservationRef: 'consequence_1',
+      attestationRef: 'attestation:assessment:base',
       method: 'negligence-analysis',
       methodVersion: '1.0',
       dimension: 'kind-of-harm' as const,
@@ -166,13 +187,25 @@ describe('foreseeability provenance', () => {
 
     expect(() =>
       assertValidForeseeabilityAssessment(
-        { ...base, id: 'a1', evaluatorId: 'insurer', disposition: 'foreseeable' },
+        {
+          ...base,
+          id: 'a1',
+          evaluatorId: 'insurer',
+          attestationRef: 'attestation:insurer:a1',
+          disposition: 'foreseeable',
+        },
         frontier.decisionAt,
       ),
     ).not.toThrow();
     expect(() =>
       assertValidForeseeabilityAssessment(
-        { ...base, id: 'a2', evaluatorId: 'court-expert', disposition: 'indeterminate' },
+        {
+          ...base,
+          id: 'a2',
+          evaluatorId: 'court-expert',
+          attestationRef: 'attestation:court:a2',
+          disposition: 'indeterminate',
+        },
         frontier.decisionAt,
       ),
     ).not.toThrow();
