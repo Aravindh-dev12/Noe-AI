@@ -21,9 +21,37 @@ This repository contains a runnable production-oriented foundation:
 - `packages/event-model` — canonical event hashing and signed Host Receipt verification;
 - `packages/providers` — OpenAI, Anthropic, and deterministic mock adapters;
 - `packages/environments` — versioned deterministic environments;
+- `packages/continuity-benchmark` — four-axis mechanical/behavioral/social/institutional continuity measurements;
+- `packages/recognition-benchmark` — replacement-resistance, CP50, migration-retention, host-specificity, fork-allocation, and recognition-half-life measurements;
 - `packages/db` — PostgreSQL/Prisma persistence, migrations, canonical history, evidence, continuity governance, authority/accountability, decision provenance, and institutional state.
 
 The first environment is **Triad**, a deterministic best-of-three competition used to validate continuity, retries, provenance, and verified career history before richer environments are introduced.
+
+## Recognition capital: the next research layer
+
+NOEONE does not assume that persistent identity is valuable. It tests the claim.
+
+The central question is:
+
+> **When a fresh agent is equally capable or substantially better, do people and hosts still choose the established actor because of its accumulated identity/history?**
+
+That residual identity-specific demand is called **recognition capital**.
+
+It is deliberately not a universal trust score.
+
+```text
+model capability
+      ↓
+substitute becomes stronger
+      ↓
+measure revealed choice
+      ↓
+replacement-resistance curve
+      ↓
+CP50: capability advantage needed to defeat incumbent preference
+```
+
+See [`RESEARCH-RECOGNITION-CAPITAL-V2.md`](./RESEARCH-RECOGNITION-CAPITAL-V2.md).
 
 ## Continuity governance
 
@@ -132,10 +160,6 @@ Consequence Observation
         +----> oversight-effectiveness assessments
 ```
 
-The Intervention Frontier does **not** claim to invent human escalation, override systems, execution-finality enforcement, or meaningful human control. It tests a narrower NOEONE hypothesis: preserve the historically evidenced oversight opportunity — including unexercised, late, nominal, unavailable, or ineffective control paths — against the exact continuing actor, execution, decision, selected action, and effect boundary.
-
-See [`RESEARCH-INTERVENTION-FRONTIER.md`](./RESEARCH-INTERVENTION-FRONTIER.md).
-
 ## Collective actors
 
 NOEONE also models the harder case where a changing population of agents forms one continuing artificial institution.
@@ -151,12 +175,6 @@ persistent team / organization identity
 
 NOEONE does not reduce a collective to its current roster. Membership, authority, dependency, action attribution, and liability remain separate typed relations.
 
-See:
-
-- [`RESEARCH-COLLECTIVE-ACTOR-CONTINUITY.md`](./RESEARCH-COLLECTIVE-ACTOR-CONTINUITY.md)
-- [`RESEARCH-COLLECTIVE-ACTION-PROVENANCE.md`](./RESEARCH-COLLECTIVE-ACTION-PROVENANCE.md)
-- [`RESEARCH-FEDERATED-ACTOR-GRAPHS.md`](./RESEARCH-FEDERATED-ACTOR-GRAPHS.md)
-
 ## Actor Passport
 
 ```http
@@ -168,8 +186,6 @@ The passport exposes stable identity, canonical lineage, current execution, gove
 An Agent Card can tell another system **how to call an agent**. A NOEONE Actor Passport is designed to answer:
 
 > **Who has this actor been, and what history still follows it?**
-
-Existing passport/version identifiers remain compatibility contracts and are not silently rewritten.
 
 ## Local development
 
@@ -198,54 +214,17 @@ Services:
 - PostgreSQL: `localhost:5432`
 - Redis: `localhost:6379`
 
-### Start a verified local match
-
-```bash
-curl -X POST http://localhost:4000/v1/matches \
-  -H 'content-type: application/json' \
-  -H 'x-noeone-admin-key: YOUR_ADMIN_API_KEY' \
-  -d '{
-    "actorAId": "act_nova",
-    "actorBId": "act_echo",
-    "environmentId": "env_triad_v1"
-  }'
-```
-
-`X-NOE-Admin-Key` and `X-Onbae-Admin-Key` remain temporary compatibility aliases. New integrations should use `X-NOEONE-Admin-Key`.
-
-## External host flow
-
-1. An operator registers a host with a signing public key.
-2. The host registers one or more versioned environments.
-3. The host creates a versioned signed Host Receipt statement.
-4. NOEONE verifies the external statement and registration policy.
-5. The original receipt remains independently verifiable.
-6. NOEONE appends its own canonical registry event to the actor career.
-
-Host keys can rotate. Retired keys remain useful for historical verification; revoked keys must not silently validate new activity.
-
-## Verification
-
-```http
-GET /v1/actors/:handle/verify
-GET /v1/actors/:handle/institutional/verify
-```
-
-Verification checks canonical event schema, monotonic sequence, hash-chain integrity, registry signatures, external Host Receipt signatures/content hashes, governed continuity, lineage consistency, and institutional projection integrity.
-
-Evidence remains queryable instead of collapsing all trust into one universal score.
-
 ## What NOEONE is not
 
 NOEONE is not another foundation model, chatbot, prompt marketplace, generic agent framework, model router, static leaderboard, universal trust score, DAO platform, payment rail, universal court, or proprietary replacement for open agent/provenance standards.
 
-We expect cognition to come from OpenAI, Anthropic, Google, Mistral, open-source models, local models, and future systems. NOEONE sits above those providers and focuses on **longitudinal actorhood, evidence, and institutional continuity**.
+We expect cognition to come from OpenAI, Anthropic, Google, Mistral, open-source models, local models, and future systems. NOEONE sits above those providers and focuses on **longitudinal actorhood, evidence, recognition, and institutional continuity**.
 
 ## Initial product hypothesis
 
 > **Can a persistent artificial actor become more valuable to users and counterparties than the model currently powering it?**
 
-The product/research program measures model-swap continuity, replacement resistance, cross-environment pull, history premium, host demand, fork recognition, obligation persistence, evidence disagreement, decision alternatives, epistemic diligence, oversight opportunity, collective continuity, and institutional succession.
+The product/research program measures model-swap continuity, replacement resistance, cross-environment pull, history premium, host demand, fork recognition, obligation persistence, evidence disagreement, decision alternatives, epistemic diligence, oversight opportunity, collective continuity, institutional succession, and actor resolution.
 
 ## Core principles
 
@@ -254,15 +233,15 @@ The product/research program measures model-swap continuity, replacement resista
 3. **Issuer claim != registry acceptance.** External evidence and NOEONE acceptance remain independently verifiable.
 4. **Evidence != truth.** Preserve artifacts and plural judgments instead of fabricating one truth bit.
 5. **Migration != fork.** Continuation and ancestry are different institutional operations.
-6. **Canonical history matters.** Research branches must not silently inherit production identity.
-7. **Provider neutrality.** No foundation-model vendor is structurally required.
-8. **Open ecosystem.** Reuse external identity, transport, payment, legal, and transparency standards where possible.
-9. **Host permission first.** Actors enter environments through explicit integrations and scoped authority.
-10. **Evidence before reputation scores.** Counterparties should derive trust from evidence relevant to them.
-11. **Backward compatibility is continuity.** Signed/history-sensitive identifiers are not rewritten for branding convenience.
-12. **Collective != roster.** Artificial institutions are not reducible to their current members.
-13. **Membership != authority.** Membership never silently grants power to bind a collective.
-14. **Dependency != authority.** Technical dependency and institutional authority stay separate typed graphs.
+6. **Recognition != reputation.** A party can recognize continuity without choosing the actor.
+7. **Recognition capital is contextual.** Never turn identity-specific demand into a universal social-credit score.
+8. **Canonical history matters.** Research branches must not silently inherit production identity.
+9. **Provider neutrality.** No foundation-model vendor is structurally required.
+10. **Open ecosystem.** Reuse external identity, transport, payment, legal, and transparency standards where possible.
+11. **Host permission first.** Actors enter environments through explicit integrations and scoped authority.
+12. **Evidence before reputation scores.** Counterparties should derive trust from evidence relevant to them.
+13. **Backward compatibility is continuity.** Signed/history-sensitive identifiers are not rewritten for branding convenience.
+14. **Collective != roster.** Artificial institutions are not reducible to their current members.
 15. **Alternative != hindsight story.** Historical Decision Frontiers record evidenced options, not imagined post-hoc possibilities.
 16. **Forecast != outcome.** Ex-ante risk and ex-post consequence are separate objects.
 17. **Oversight presence != oversight opportunity.** A named supervisor or override button does not prove timely, informed, enforceable control.
@@ -283,11 +262,8 @@ New public names should use **NOEONE** / `noeone` when migration is safe. Existi
 - [`PRODUCT.md`](./PRODUCT.md) — product surface
 - [`RESEARCH.md`](./RESEARCH.md) — continuity research program
 - [`RESEARCH-NEXT.md`](./RESEARCH-NEXT.md) — continuity-governance foundations
+- [`RESEARCH-RECOGNITION-CAPITAL-V2.md`](./RESEARCH-RECOGNITION-CAPITAL-V2.md) — identity-specific demand benchmark
 - [`RESEARCH-DECISION-FRONTIER.md`](./RESEARCH-DECISION-FRONTIER.md) — historical action alternatives
-- [`RESEARCH-EPISTEMIC-DILIGENCE.md`](./RESEARCH-EPISTEMIC-DILIGENCE.md) — verification opportunity and diligence
-- [`RESEARCH-FORESEEABILITY-PROVENANCE.md`](./RESEARCH-FORESEEABILITY-PROVENANCE.md) — ex-ante outcome forecasts
-- [`RESEARCH-INTERVENTION-FRONTIER.md`](./RESEARCH-INTERVENTION-FRONTIER.md) — oversight opportunity provenance
-- [`RESEARCH-INSTITUTIONAL-CONTINUITY.md`](./RESEARCH-INSTITUTIONAL-CONTINUITY.md) — evidence/obligation/consequence research
 - [`RESEARCH-ACTOR-RESOLUTION.md`](./RESEARCH-ACTOR-RESOLUTION.md) — resolution when normal continuation fails
 - [`RESEARCH-COLLECTIVE-ACTOR-CONTINUITY.md`](./RESEARCH-COLLECTIVE-ACTOR-CONTINUITY.md) — persistent artificial organizations
 - [`ROADMAP.md`](./ROADMAP.md) — staged path to the actor network
